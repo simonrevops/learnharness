@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { AuthKeyStatus } from "@/src/core";
+import { CLAUDE_CODE_ENGINE_UI, type AuthKeyStatus } from "@/src/core";
 import { classifyKeys, type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { useModelCatalog } from "@/components/model-picker";
 import type { ModelCatalogResponse } from "@/src/core";
@@ -55,7 +55,7 @@ export function useZeroKeys(): boolean {
 	useSettingsSaved((section) => {
 		if (section === "keys") read();
 	});
-	return zeroKeys;
+	return CLAUDE_CODE_ENGINE_UI ? false : zeroKeys;
 }
 
 /** The pill itself — the models CTA's chrome and placement, the keys
@@ -97,5 +97,5 @@ export function useStrongKeyless(): boolean {
 	useSettingsSaved((section) => {
 		if (section === "keys" || section === "models") refresh();
 	});
-	return strongKeyless(catalog);
+	return CLAUDE_CODE_ENGINE_UI ? false : strongKeyless(catalog);
 }

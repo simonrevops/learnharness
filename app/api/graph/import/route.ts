@@ -13,7 +13,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { extraction, NotesImportError } from "@/src/server";
+import { CC_ENGINE, extraction, NotesImportError } from "@/src/server";
 import {
 	ModelsNotConfiguredError,
 	PROVIDER_KEY_MISSING_CODE,
@@ -41,6 +41,9 @@ interface ImportResult {
 }
 
 export async function POST(request: Request) {
+	// Claude Code engine (fork): notes imports have no lesson session to work
+	// the extraction stages yet.
+	if (CC_ENGINE) return Response.json({ error: "Notes import is not available with the Claude Code engine yet" }, { status: 501 });
 	const form = await request.formData();
 	const files = form.getAll("files").filter((f): f is File => f instanceof File);
 	if (files.length === 0) {

@@ -1,3 +1,4 @@
+import { CLAUDE_CODE_ENGINE_UI } from "./engine.ts";
 /**
  * THE USER SETTINGS RECORD's shape + sanitizer (settings-storage wave,
  * 2026-09-19): one versioned, DELTA-shaped record at the data-dir seam
@@ -211,6 +212,8 @@ export interface ModelsSettings {
  *  models section carries a model in every slot. Thinking levels stay
  *  optional (absent = the resolved tier's budget). */
 export function slotsConfigured(models: ModelsSettings | undefined): boolean {
+	// Claude Code engine (fork): the learner's Claude Code session is the model.
+	if (CLAUDE_CODE_ENGINE_UI) return true;
 	return Boolean(models?.strong?.model && models?.cheap?.model && models?.vision?.model);
 }
 

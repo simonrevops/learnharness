@@ -53,6 +53,9 @@ import {
 } from "../core/input-events.ts";
 import { steerDelivered } from "../core/contracts.ts";
 import type {CallUsage, SteerMessage} from "../core/contracts.ts";
+import { CC_ENGINE } from "./cc/env.ts";
+import { ClaudeCodeAgent } from "./cc/agent.ts";
+import { claudeCodeSubmitRunner } from "./cc/stage.ts";
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -100,6 +103,9 @@ const jobRunner = createJobRunner({
  *  (/api/graph/import) hit the same single-flight registry. */
 export const extraction = createExtractionPipeline({
 	...stores,
+	// Claude Code engine (fork): the extractor/auditor stages are worked by the
+	// lesson's Claude Code session (cc/stage.ts) instead of a pi model loop.
+	...(CC_ENGINE ? { submitRunner: claudeCodeSubmitRunner } : {}),
 	// BYOK (owner, 2026-09-22): the extraction stages resolve the chain —
 	// role override → slot → NOTHING — read FRESH per stage call; an empty
 	// chain flows through as undefined and the pipeline refuses the run
@@ -185,55 +191,64 @@ export async function handleChatInput(
 	// write-ahead persist (nothing durable changes), and every downstream
 	// resolution (jobs/extraction gate per-need on their own tiers).
 	const effective = effectiveSettings();
-	const conversation = resolveConversationSpec(record.settings, effective.models.strong);
-	if (!conversation) {
-		const envelope = modelsNotConfigured(["strong"]);
-		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
-		return Response.json(envelope, { status: 503 });
+	// THE CLAUDE CODE ENGINE (fork): the conversation runs in the learner's own
+	// Claude Code session — no BYOK model, no provider key, and Claude Code
+	// compacts its own context. Practice sessions are not wired to it yet.
+	if (CC_ENGINE && record.kind === "practice") {
+		return Response.json({ error: "Practice sessions are not available with the Claude Code engine yet" }, { status: 501 });
 	}
+	let conversationEngine: PiEngine | undefined;
+	if (!CC_ENGINE) {
+		const conversation = resolveConversationSpec(record.settings, effective.models.strong);
+		if (!conversation) {
+			const envelope = modelsNotConfigured(["strong"]);
+			console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
+			return Response.json(envelope, { status: 503 });
+		}
 
-	// THE KEY-PRESENCE GATE (provider-key interlude, owner, 2026-09-25): a
-	// pinned model is not enough — its PROVIDER's key must be present, or
-	// the turn dies mid-stream masked to a generic error. Truth is env-first
-	// (providerKeyPresent reads what pi-ai would read at request time), so
-	// an env-shadowed key passes. Same placement discipline as the models
-	// gate: BEFORE beginTurn (no liveness effects) and the write-ahead
-	// persist (nothing durable changes); wake-pipeline turns ride the same
-	// path. The affected tier is strong — the conversation chain's own tier
-	// (a chat.model override still resolves through it).
-	if (!providerKeyPresent(conversation.provider)) {
-		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
-		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
-		return Response.json(envelope, { status: 503 });
+		// THE KEY-PRESENCE GATE (provider-key interlude, owner, 2026-09-25): a
+		// pinned model is not enough — its PROVIDER's key must be present, or
+		// the turn dies mid-stream masked to a generic error. Truth is env-first
+		// (providerKeyPresent reads what pi-ai would read at request time), so
+		// an env-shadowed key passes. Same placement discipline as the models
+		// gate: BEFORE beginTurn (no liveness effects) and the write-ahead
+		// persist (nothing durable changes); wake-pipeline turns ride the same
+		// path. The affected tier is strong — the conversation chain's own tier
+		// (a chat.model override still resolves through it).
+		if (!providerKeyPresent(conversation.provider)) {
+			const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
+			console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
+			return Response.json(envelope, { status: 503 });
+		}
+
+		// THE COMPACTION GATE (owner round 14, 2026-10-05 — the structural
+		// ruling: NOTHING model-facing for this chat interleaves with a
+		// running compaction): await any in-flight compaction (the settle
+		// kick usually finished inside the learner's answer pause), and if
+		// the record is STILL over threshold, compact synchronously — this
+		// request waits. Skipped under tests (the extraction precedent);
+		// placement mirrors the BYOK/key gates — BEFORE appends and
+		// beginTurn, no liveness effects — and the record re-reads after
+		// because compaction appends the marker.
+		conversationEngine = piEngineForSpec(conversation);
+		const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
+		await ensureCompacted(
+			{
+				chatStore: stores.chatStore,
+				engine: conversationEngine,
+				modelId: modelIdForCompaction,
+				kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
+				thresholdTokens: effectiveThresholdTokens(
+					effective.compaction?.thresholdTokens,
+					catalogContextLimits().get(modelIdForCompaction),
+				),
+				systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			},
+			chatId,
+		);
+		const compactedRecord = stores.chatStore.getChat(chatId);
+		if (compactedRecord) record = compactedRecord;
 	}
-
-	// THE COMPACTION GATE (owner round 14, 2026-10-05 — the structural
-	// ruling: NOTHING model-facing for this chat interleaves with a
-	// running compaction): await any in-flight compaction (the settle
-	// kick usually finished inside the learner's answer pause), and if
-	// the record is STILL over threshold, compact synchronously — this
-	// request waits. Skipped under tests (the extraction precedent);
-	// placement mirrors the BYOK/key gates — BEFORE appends and
-	// beginTurn, no liveness effects — and the record re-reads after
-	// because compaction appends the marker.
-	const conversationEngine = piEngineForSpec(conversation);
-	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
-	await ensureCompacted(
-		{
-			chatStore: stores.chatStore,
-			engine: conversationEngine,
-			modelId: modelIdForCompaction,
-			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
-			thresholdTokens: effectiveThresholdTokens(
-				effective.compaction?.thresholdTokens,
-				catalogContextLimits().get(modelIdForCompaction),
-			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
-		},
-		chatId,
-	);
-	const compactedRecord = stores.chatStore.getChat(chatId);
-	if (compactedRecord) record = compactedRecord;
 
 	// The input's native appends (pure; the honest 400 for an answer with no
 	// pending question call). Computed BEFORE beginTurn so a refused input
@@ -329,7 +344,7 @@ export async function handleChatInput(
 	const engine = conversationEngine;
 	// Provider-qualified stamp (model slots wave): matches the price table's
 	// provider:id keys.
-	const modelId = `${engine.model.provider}:${engine.model.id}`;
+	const modelId = engine ? `${engine.model.provider}:${engine.model.id}` : "claude-code";
 	// Tests inject a factory: the agent is stateless per turn, so each
 	// request builds a fresh one off the record — the factory mirrors that
 	// seam exactly. Wave B: the record IS the agent state (native messages;
@@ -357,7 +372,14 @@ export async function handleChatInput(
 	// split, no plan/question/job tools; the whole registry is
 	// problem + conclude. buildAgent stays honored (the test seam is
 	// uniform across kinds).
-	const constructed: TeachingAgent = buildAgent
+	const constructed: TeachingAgent = CC_ENGINE
+		? (new ClaudeCodeAgent({
+				chatId,
+				title: record.title ?? "Lesson",
+				messages: asAgentMessages(merged),
+				onUsage: collectUsage,
+			}) as unknown as TeachingAgent)
+		: buildAgent
 		? buildAgent({ ...agentOpts, teaching })
 		: record.kind === "practice"
 			? createPracticeAgent(
@@ -455,6 +477,9 @@ export async function handleChatInput(
 			// transcript directly (the retry context the model saw).
 			onError: (error) => {
 				console.error(`[chat ${chatId}] turn error:`, error);
+				// Claude Code engine: "start Claude Code / check its tab" is the
+				// learner's to act on — say it instead of masking it.
+				if (CC_ENGINE && error instanceof Error && error.name === "CcNotReadyError") return error.message;
 				return "An error occurred.";
 			},
 			onFinish: (turnMessages, isAborted) => {
@@ -479,7 +504,9 @@ export async function handleChatInput(
 				// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
 				// no extraction, no graph, no coverage (v1: the session itself
 				// is the deliverable).
-				if (record.kind !== "practice" && extractionEnabled(effective.graph)) {
+				// Claude Code engine: the graph updates after the lesson, on request
+				// (the Extract action) — never mid-lesson behind the learner's back.
+				if (!CC_ENGINE && record.kind !== "practice" && extractionEnabled(effective.graph)) {
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares
 					// against it and the pipeline's batches share it.
@@ -520,7 +547,7 @@ export async function handleChatInput(
 				// beneath-threshold record is a silent no-op. Skipped under
 				// tests (the extraction precedent — scripted chats are
 				// fixtures; the service itself is pinned directly).
-				if (process.env.NODE_ENV !== "test")
+				if (process.env.NODE_ENV !== "test" && !CC_ENGINE)
 					kickCompaction(() => {
 						const fresh = effectiveSettings();
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);

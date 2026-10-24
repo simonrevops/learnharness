@@ -59,6 +59,10 @@ All three platforms support in-app updates.
 - **External services.** Models run through your configured providers. Model requests send the context needed for the task; web research and dictation also contact external services. Local storage does not mean offline processing.
 - **Inspectable behavior.** System prompts are visible and editable. The app is open source under the AGPL-3.0 license.
 
+## This fork: run lessons on your Claude subscription
+
+This fork can run lessons through your own Claude Code session instead of an API key: Claude Code teaches in a Terminal tab, and LearnHarness keeps its record, tools, plan map and knowledge graph. See [docs/claude-code-engine.md](docs/claude-code-engine.md).
+
 ## Development and support
 
 ```bash

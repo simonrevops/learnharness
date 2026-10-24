@@ -10,7 +10,7 @@
  * flight (the dock is the source of truth for that); failures are logged
  * by the pipeline and leave coverage untouched — the button stays honest.
  */
-import { extraction, extractionStatuses } from "@/src/server";
+import { CC_ENGINE, extraction, extractionStatuses, startGraphUpdate } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +25,9 @@ export async function POST(request: Request) {
 	if (typeof chatId !== "string" || chatId === "") {
 		return Response.json({ error: 'Body must be {chatId: string}' }, { status: 400 });
 	}
+	// Claude Code engine (fork): the lesson's own Claude Code session works the
+	// update (cc/graph-update.ts).
+	if (CC_ENGINE) return startGraphUpdate(chatId);
 	if (extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId)) {
 		return Response.json({ error: "An extraction run is already in flight for this session" }, { status: 409 });
 	}

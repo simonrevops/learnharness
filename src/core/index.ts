@@ -75,3 +75,6 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+
+// The Claude Code engine flag (fork, docs/claude-code-engine.md).
+export { CLAUDE_CODE_ENGINE_UI } from "./engine.ts";

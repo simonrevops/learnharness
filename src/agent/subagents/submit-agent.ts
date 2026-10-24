@@ -45,7 +45,12 @@ export function healStringifiedArrays(raw: unknown): unknown {
 	return out;
 }
 
-export async function runSubmitAgent<T>(opts: {
+export async function runSubmitAgent<T>(opts: SubmitAgentSpec<T>): Promise<T> {
+	return runSubmitAgentImpl(opts);
+}
+
+/** One single-submit stage: what runs, and how its submit is accepted. */
+export interface SubmitAgentSpec<T> {
 	role: ModelRole;
 	toolName: string;
 	toolDescription: string;
@@ -76,7 +81,9 @@ export async function runSubmitAgent<T>(opts: {
 	 *  a problem string yields an isError result (invalidInputResult) →
 	 *  the model retries within maxTurns. null = accept. */
 	validate?: (value: T) => string | null;
-}): Promise<T> {
+}
+
+async function runSubmitAgentImpl<T>(opts: SubmitAgentSpec<T>): Promise<T> {
 	let submitted: T | undefined;
 	const result = await runSubagent(
 		[

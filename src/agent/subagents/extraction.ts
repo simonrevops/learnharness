@@ -30,7 +30,7 @@ import { settleGraphLayout } from "../../core/layout-settle.ts";
 import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
 import { auditorGraphTools } from "../tools/graph.ts";
-import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
+import { runSubmitAgent, healStringifiedArrays, type SubmitAgentSpec } from "./submit-agent.ts";
 
 /**
  * The extraction pipeline (vision §1 construction, 2026-09-02 redesign;
@@ -464,6 +464,7 @@ export function sourceDigest(graph: DerivedGraph, sourceId: string): string {
  *  anchor boundary: every submitted proposition's messageId must name
  *  one of them (validateSessionAnchors at the submit seam). */
 function runExtractor(
+	submit: SubmitRunner,
 	engine: PiEngine | undefined,
 	sourceId: string,
 	prompt: string,
@@ -476,7 +477,7 @@ function runExtractor(
 	// since chains-primary. Validation runs at the submit seam (error-back)
 	// over the MIXED namespace: local ids + existing graph ids, plus the
 	// session anchor law (messageId ∈ the current batch, 2026-10-13).
-	return runSubmitAgent<SessionFindingsSubmit>({
+	return submit<SessionFindingsSubmit>({
 		role: "extractor",
 		// Debug recorder key: the source id (the run's ledger key — the
 		// chat's chatId for chat runs, the src id for notes).
@@ -501,6 +502,7 @@ function runExtractor(
  *  the BASE wire (no messageId: notes have no passages, and a stray one
  *  is stripped at the fill seam). */
 function runNotesExtractor(
+	submit: SubmitRunner,
 	engine: PiEngine | undefined,
 	sourceId: string,
 	prompt: string,
@@ -508,7 +510,7 @@ function runNotesExtractor(
 	signal: AbortSignal | undefined,
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
 ): Promise<NotesFindings> {
-	return runSubmitAgent<FindingsSubmit>({
+	return submit<FindingsSubmit>({
 		role: "extractor",
 		// Debug recorder key: the notes' source id (the ledger key).
 		chatId: sourceId,
@@ -570,6 +572,7 @@ Include the "links" field even when empty — "links": [] when nothing links. NE
  *  identical once attribution died). An agentic loop: graph-exploration
  *  tools plus the one submit call. */
 function runAuditor(
+	submit: SubmitRunner,
 	engine: PiEngine | undefined,
 	sourceId: string,
 	prompt: string,
@@ -577,7 +580,7 @@ function runAuditor(
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
 	tools: Record<string, AgentTool<any>>,
 ): Promise<AuditVerdicts> {
-	return runSubmitAgent({
+	return submit({
 		role: "auditor",
 		// Debug recorder key: same source id as the extractor run.
 		chatId: sourceId,
@@ -722,7 +725,15 @@ export interface ExtractionModels {
 	 *  inject engines directly (test engines never owe a key). A keyless
 	 *  stage refuses with ProviderKeyMissingError BEFORE any batch runs. */
 	providerKeyMissing?: (provider: string, tier: ModelSlotName) => ProviderKeyMissing | null;
+	/** The stage loop (fork: Claude Code engine). Absent = the pi engine's
+	 *  runSubmitAgent. Present = something else does each stage's work and
+	 *  returns the accepted submit — the engines and key gates then don't
+	 *  apply (no stage engine is used). */
+	submitRunner?: SubmitRunner;
 }
+
+/** Runs one single-submit stage to its accepted value. */
+export type SubmitRunner = <T>(opts: SubmitAgentSpec<T>) => Promise<T>;
 
 export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
 	/** The chunk budget — the transcript-token share of the extractor's
@@ -785,6 +796,7 @@ export function callUsage(usage: Usage): CallUsage {
 
 export function createExtractionPipeline(deps: ExtractionPipelineDeps): ExtractionPipeline {
 	const { chatStore, graphStore } = deps;
+	const submitRunner: SubmitRunner = deps.submitRunner ?? runSubmitAgent;
 	// Stage-engine resolution: a direct test value wins; otherwise the
 	// engineFor chain (role override → slot → nothing, resolved FRESH per
 	// stage call server-side) — the job runner's exact treatment. undefined
@@ -797,6 +809,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  and whether a configured stage's provider key is gone (provider-key
 	 *  interlude, 2026-09-25) — both refuse BEFORE any batch runs. */
 	function refuseIfStagesUnready(): void {
+		if (deps.submitRunner) return; // no stage engine runs at all
 		const stages: readonly [ModelRole, PiEngine | undefined][] = [
 			["extractor", stageEngine("extractor", deps.extractor)],
 			["auditor", stageEngine("auditor", deps.auditor)],
@@ -929,6 +942,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		const t0 = performance.now();
 
 		const findings = await runExtractor(
+			submitRunner,
 			stageEngine("extractor", deps.extractor),
 			sourceId,
 			prompt,
@@ -961,6 +975,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// IDENTITY-only and never sees the passages, so anchors are useless
 		// to it — they add cognitive load, not signal.
 		const auditResult = await runAuditor(
+			submitRunner,
 			stageEngine("auditor", deps.auditor),
 			sourceId,
 			`Proposed findings from the extractor (the source itself is not available to you — the extractor is fully trusted; the propositions only — the reasoning chains are the merger's business, owner 2026-09-30):\n\n` +
@@ -1280,6 +1295,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		);
 		const t0 = performance.now();
 		const findings = await runNotesExtractor(
+			submitRunner,
 			stageEngine("extractor", deps.extractor),
 			input.id,
 			prompt,
