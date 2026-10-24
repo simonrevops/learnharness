@@ -7,6 +7,7 @@ import { convertTranscript, readTranscript } from "./transcript.ts";
 import { deliver, interrupt, liveProcess, sessionRecordFor, transcriptPath } from "./session.ts";
 import { typeInto } from "./terminal.ts";
 import { registerLive, unregisterLive } from "./live.ts";
+import { reseedPracticeGate } from "./tools.ts";
 
 /**
  * The pi Agent surface runPiTurn drives (subscribe / continue / abort /
@@ -77,6 +78,9 @@ export class ClaudeCodeAgent {
 		registerLive(chatId, live);
 		this.emit({ type: "agent_start" });
 		try {
+			// The practice gate starts each turn from the record (which carries a
+			// dismissal the learner made since the last turn).
+			reseedPracticeGate(chatId, this.state.messages as unknown as LhMessage[]);
 			// A handoff left undelivered (e.g. Claude Code was closed right after
 			// the probe) goes first: the teacher plans before anything else.
 			const input = this.pendingInput();
@@ -96,22 +100,8 @@ export class ClaudeCodeAgent {
 	 *  answers to the posed questions. */
 	private pendingInput(): string | null {
 		const last = this.state.messages.at(-1) as LhMessage | undefined;
-		if (last?.role === "user") {
-			// Every learner message since the teacher last spoke — a turn that
-			// failed to reach Claude Code leaves its message unanswered, and the
-			// retry must carry it too.
-			const msgs = this.state.messages as unknown as LhMessage[];
-			let i = msgs.length;
-			while (i > 0 && msgs[i - 1]!.role === "user") i--;
-			const text = msgs
-				.slice(i)
-				.map((m) => {
-					const c = (m as Extract<LhMessage, { role: "user" }>).content;
-					return typeof c === "string" ? c : c.map((x) => ("text" in x ? x.text : "")).join("");
-				})
-				.join("\n\n");
-			return text;
-		}
+		const learner = learnerInput(this.state.messages as unknown as LhMessage[]);
+		if (learner) return learner;
 		if (last?.role === "toolResult" && QUESTION_NAMES.has(last.toolName)) {
 			// The learner answered the question(s) the teacher posed. Under pi the
 			// answer is the call's result; here it reaches Claude Code as the next
@@ -197,4 +187,58 @@ export class ClaudeCodeAgent {
 		const { prompts } = convertTranscript(readTranscript(transcriptPath(rec.ccSessionId)), this.o.chatId);
 		return !prompts.some((p) => p.trim() === HANDOFF_TEXT.trim());
 	}
+}
+
+/** Session markers whose text is the learner's (or the app's, on his
+ *  behalf) and goes to Claude Code as his message. */
+const SPOKEN_MARKERS = new Set(["graph-context", "practice-thinking", "practice-next"]);
+
+const DISMISSED_TEXT =
+	"(I discarded the problem without finishing it — treat it as concluded with outcome \"dismissed\"; call nothing for it.)";
+
+function textOf(content: unknown): string {
+	if (typeof content === "string") return content;
+	return Array.isArray(content) ? content.map((x: { text?: string }) => x.text ?? "").join("") : "";
+}
+
+function isSynthetic(m: LhMessage): boolean {
+	return m.role === "assistant" && (m as AssistantMessage).provider === "synthetic";
+}
+
+/**
+ * Everything the learner said since the agent last spoke: his messages, his
+ * practice thinking and next-problem signals, the session's opening map
+ * context, and a problem he discarded (its synthesized conclude pair is
+ * skipped — Claude Code never made that call). A turn that failed to reach
+ * Claude Code leaves its input unanswered, and the retry carries it too.
+ * Pure: the seam tests pin.
+ */
+export function learnerInput(messages: readonly LhMessage[]): string | null {
+	// Answers to posed questions end in a tool result: pendingInput's other path.
+	if (messages.at(-1)?.role === "toolResult") return null;
+	const parts: string[] = [];
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i]!;
+		if (m.role === "user") {
+			parts.push(textOf((m as { content: unknown }).content));
+			continue;
+		}
+		if (m.role === "custom") {
+			const type = (m as { customType?: string }).customType ?? "";
+			if (SPOKEN_MARKERS.has(type)) parts.push(textOf((m as { content: unknown }).content));
+			else if (type === "problem-dismissed") parts.push(DISMISSED_TEXT);
+			else break;
+			continue;
+		}
+		if (m.role === "toolResult" && (m as { toolName?: string }).toolName === "conclude") {
+			// Only the synthesized dismissal's result, whose call sits just before it.
+			const prev = messages[i - 1];
+			if (prev && isSynthetic(prev)) continue;
+			break;
+		}
+		if (isSynthetic(m)) continue;
+		break;
+	}
+	const text = parts.filter((p) => p.trim()).reverse().join("\n\n");
+	return text || null;
 }

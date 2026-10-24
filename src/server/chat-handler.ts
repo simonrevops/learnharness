@@ -193,10 +193,8 @@ export async function handleChatInput(
 	const effective = effectiveSettings();
 	// THE CLAUDE CODE ENGINE (fork): the conversation runs in the learner's own
 	// Claude Code session — no BYOK model, no provider key, and Claude Code
-	// compacts its own context. Practice sessions are not wired to it yet.
-	if (CC_ENGINE && record.kind === "practice") {
-		return Response.json({ error: "Practice sessions are not available with the Claude Code engine yet" }, { status: 501 });
-	}
+	// compacts its own context. Practice sessions run there too
+	// (docs/blocks-and-courses.md decision 10).
 	let conversationEngine: PiEngine | undefined;
 	if (!CC_ENGINE) {
 		const conversation = resolveConversationSpec(record.settings, effective.models.strong);

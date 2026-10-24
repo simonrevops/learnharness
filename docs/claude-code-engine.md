@@ -38,7 +38,7 @@ Anthropic's terms allow a Claude subscription only inside Anthropic's own apps, 
 
 ## Not in stage 1
 
-- Practice sessions and notes import (both return 501 under this engine).
+- Notes import (returns 501 under this engine). Practice sessions arrived in stage 2 (docs/blocks-and-courses.md).
 - Research, demo, visual and PDF jobs. The teacher uses WebSearch and Read directly instead.
 - Messages typed straight into the Terminal tab reach the teacher, but don't appear in the app's record.
 - Steering mid-turn is basic: the text is typed into the busy session and Claude Code queues it.

@@ -255,6 +255,10 @@ function sessionMeta(chat: ChatListItem): string {
 		return `Problem waiting · ${timeAgo(chat.updatedAt)}`;
 	}
 	if (chat.busy) return "Working…";
+	// The course link (fork, docs/blocks-and-courses.md).
+	if (chat.course?.name) {
+		return `${chat.course.name}${chat.course.week ? ` · wk ${chat.course.week}` : ""} · ${timeAgo(chat.updatedAt)}`;
+	}
 	return timeAgo(chat.updatedAt);
 }
 

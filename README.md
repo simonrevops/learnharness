@@ -63,6 +63,8 @@ All three platforms support in-app updates.
 
 This fork can run lessons through your own Claude Code session instead of an API key: Claude Code teaches in a Terminal tab, and LearnHarness keeps its record, tools, plan map and knowledge graph. See [docs/claude-code-engine.md](docs/claude-code-engine.md).
 
+It also knows about university blocks: point it at the folder holding this block's courses, and each course's folder is read once for its weeks and assessments. The home screen then shows what to do this week in each course, and lessons and practice sessions can read your course files. See [docs/blocks-and-courses.md](docs/blocks-and-courses.md).
+
 ## Development and support
 
 ```bash

@@ -12,6 +12,7 @@ import { DictationBar, joinDictation, useDictation } from "@/components/dictatio
 import { useFieldCycle } from "@/components/field-cycle";
 import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
+import { BlockPanel } from "@/components/block-panel";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -204,6 +205,13 @@ export function Home({
 					<SidebarToggle />
 				</div>
 			</header>
+
+			{/* The block panel (fork, docs/blocks-and-courses.md): this week in
+			    each course, floating top-left under the toggle — the graph's
+			    own chrome owns the top-right column. */}
+			<div className="lh-no-drag pointer-events-auto absolute left-3 top-12 z-10 max-h-[calc(100dvh-14rem)] overflow-y-auto">
+				<BlockPanel />
+			</div>
 
 			{/* New session — same floating blob as the chat composer, docked
 			    OVER the graph (no gradient: the graph runs clean under it to the

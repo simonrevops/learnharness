@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { PATHS } from "../../../config.ts";
 import {
-	CC_DIR,
 	CC_MCP_SERVER,
 	CC_SESSIONS_DIR,
 	CC_TOOL_PREFIX,
@@ -14,7 +13,7 @@ import {
 	lhBaseUrl,
 } from "./env.ts";
 import { openTab, shellQuote, typeInto, focusTab, keyInto } from "./terminal.ts";
-import { composeClaudeCodeInstructions } from "./prompt.ts";
+import { launchSpecFor } from "./launch.ts";
 import { GRAPH_EXTRACTOR_AGENT } from "./stage.ts";
 
 /**
@@ -64,6 +63,14 @@ export function sessionRecordFor(chatId: string): CcSessionRecord {
 	const rec: CcSessionRecord = { chatId, ccSessionId: randomUUID(), createdAt: new Date().toISOString() };
 	writeSessionRecord(rec);
 	return rec;
+}
+
+/** Give the id a new Claude Code conversation, unless its session is running
+ *  (a re-run then continues in the open tab). */
+export function freshSession(chatId: string): void {
+	const existing = readSessionRecord(chatId);
+	if (existing && liveProcess(existing.ccSessionId)) return;
+	writeSessionRecord({ chatId, ccSessionId: randomUUID(), createdAt: new Date().toISOString() });
 }
 
 function alive(pid: number): boolean {
@@ -128,12 +135,14 @@ export function transcriptPath(ccSessionId: string): string {
 }
 
 /** Write the launch files: the shared workspace (with the graph-extractor
- *  subagent), the composed system prompt, and this chat's MCP + settings. */
-function writeLaunchFiles(chatId: string): { mcp: string; settings: string; prompt: string } {
+ *  subagent), this session's system prompt, and its MCP + settings. */
+function writeLaunchFiles(chatId: string): { mcp: string; settings: string; prompt: string; addDirs: string[] } {
 	fs.mkdirSync(path.join(CC_WORKSPACE, ".claude", "agents"), { recursive: true });
 	fs.writeFileSync(path.join(CC_WORKSPACE, ".claude", "agents", "graph-extractor.md"), GRAPH_EXTRACTOR_AGENT);
-	const prompt = path.join(CC_DIR, "system-prompt.md");
-	fs.writeFileSync(prompt, composeClaudeCodeInstructions());
+	const spec = launchSpecFor(chatId);
+	fs.mkdirSync(CC_SESSIONS_DIR, { recursive: true });
+	const prompt = path.join(CC_SESSIONS_DIR, `${chatId}.prompt.md`);
+	fs.writeFileSync(prompt, spec.prompt);
 	const mcp = path.join(CC_SESSIONS_DIR, `${chatId}.mcp.json`);
 	fs.writeFileSync(
 		mcp,
@@ -165,7 +174,7 @@ function writeLaunchFiles(chatId: string): { mcp: string; settings: string; prom
 			2,
 		),
 	);
-	return { mcp, settings, prompt };
+	return { mcp, settings, prompt, addDirs: spec.addDirs.filter((d) => fs.existsSync(d)) };
 }
 
 function launchCommand(rec: CcSessionRecord, title: string): string {
@@ -180,6 +189,9 @@ function launchCommand(rec: CcSessionRecord, title: string): string {
 		`--mcp-config ${shellQuote(files.mcp)}`,
 		`--system-prompt-file ${shellQuote(files.prompt)}`,
 		"--tools Read,Glob,Grep,WebSearch,WebFetch,Agent",
+		// Course sessions read the learner's course folders (read-only: the
+		// settings deny every writing tool).
+		...files.addDirs.map((d) => `--add-dir ${shellQuote(d)}`),
 		`-n ${shellQuote(`LearnHarness · ${title}`.slice(0, 80))}`,
 		...(process.env.LH_CC_MODEL ? [`--model ${shellQuote(process.env.LH_CC_MODEL)}`] : []),
 	];

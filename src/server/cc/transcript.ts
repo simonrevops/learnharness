@@ -246,13 +246,18 @@ export function convertTranscript(entries: readonly CcEntry[], chatId: string): 
 					role: "toolResult",
 					toolCallId: b.tool_use_id,
 					toolName: name,
-					content: [{ type: "text", text }],
+					// LearnHarness's own result text where it differs from what Claude
+					// Code was told (a posed problem's "end your turn now").
+					content: [{ type: "text", text: stored?.text ?? text }],
 					...(stored?.details !== undefined ? { details: stored.details as never } : {}),
 					isError: b.is_error === true || stored?.isError === true,
 					timestamp: entry.timestamp ? Date.parse(entry.timestamp) : Date.now(),
 				};
 				messages.push(result);
 				last = result;
+				// A posed problem ends the practice turn, as a question does: what
+				// Claude Code adds after it is dropped.
+				if (name === "problem" && !result.isError) posed = true;
 				// The probe→teach seam: the record carries the handoff marker right
 				// after a successful probe_done, exactly where the pi engine's wake
 				// would have put it (the UI draws its phase divider from it).

@@ -45,6 +45,7 @@ export async function startDraftSession(
 	fetchLike: typeof fetch,
 	mode?: "practice",
 	picks?: readonly DraftPick[],
+	courseId?: string,
 ): Promise<string | null> {
 	const t = text.trim();
 	if (!t) return null;
@@ -55,11 +56,13 @@ export async function startDraftSession(
 	const res = await fetchLike("/api/chats", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(
-			mode === "practice"
+		body: JSON.stringify({
+			...(mode === "practice"
 				? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-				: { title: t },
-		),
+				: { title: t }),
+			// The course link (fork, docs/blocks-and-courses.md).
+			...(courseId ? { courseId } : {}),
+		}),
 	});
 	const { id } = (await res.json()) as { id: string };
 	// No settings PUT on create (per-session models, owner 2026-09-28):
@@ -83,7 +86,11 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	courseLabel,
 }: {
+	/** The course the draft belongs to (fork, stage 2), shown as the
+	 *  empty state's title. */
+	courseLabel?: string;
 	busy: boolean;
 	text: string;
 	onChange: (v: string) => void;
@@ -172,7 +179,13 @@ export function DraftShell({
 						<Conversation className="h-full min-w-0 flex-1" initial="instant">
 							<ConversationContent className="min-h-full gap-0 p-0">
 								<ConversationEmptyState
-									title={mode === "practice" ? "New practice session" : "New session"}
+									title={
+										courseLabel
+											? `${courseLabel} — ${mode === "practice" ? "practice" : "new lesson"}`
+											: mode === "practice"
+												? "New practice session"
+												: "New session"
+									}
 									description={
 										mode === "practice"
 											? "Pick nodes from your knowledge graph, describe what you want to practice, or bring your own problem."
@@ -230,14 +243,26 @@ export function DraftShell({
 	);
 }
 
-export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
+export function NewSession({
+	initialConfigured,
+	mode = "teach",
+	course,
+	initialText = "",
+}: {
+	initialConfigured: boolean;
+	mode?: "teach" | "practice";
+	/** The course the session will belong to (fork, stage 2). */
+	course?: { id: string; label: string };
+	/** A prefilled opening message (a course card's suggestion). */
+	initialText?: string;
+}) {
 	const router = useRouter();
-	const [text, setText] = useState("");
+	const [text, setText] = useState(initialText);
 	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
 	 * finish-first send calls THIS send after the dictation flush — which
 	 * landed via setState and may not have re-rendered yet. The send reads
 	 * the mirror; every write keeps it current. */
-	const textRef = useRef("");
+	const textRef = useRef(initialText);
 	const applyText = (v: string) => {
 		textRef.current = v;
 		setText(v);
@@ -302,13 +327,19 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 			return;
 		}
 		setBusy(true);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined)
+		void startDraftSession(
+			draft,
+			fetch,
+			mode === "practice" ? "practice" : undefined,
+			mode === "practice" ? picksRef.current : undefined,
+			course?.id,
+		)
 			.then((target) => {
 				if (target) router.push(target);
 				else setBusy(false);
 			})
 			.catch(() => setBusy(false));
-	}, [busy, router, configured, zeroKeys, strongKeyless]);
+	}, [busy, router, configured, zeroKeys, strongKeyless, course?.id]);
 
 	return (
 		<>
@@ -318,6 +349,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				onChange={applyText}
 				onSend={send}
 				mode={mode}
+				courseLabel={course?.label}
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}

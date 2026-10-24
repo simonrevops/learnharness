@@ -13,6 +13,12 @@ import { effectiveSettings, stores } from "../stores.ts";
 import { hasToolSuccess, storeToolResult } from "./results.ts";
 import { liveMessages } from "./live.ts";
 import { stageToolList, callStageTool, isStageTool } from "./stage.ts";
+import { callCourseTool, courseToolList } from "./course-setup.ts";
+import { concludeTool, problemTool, type PracticeGate } from "../../agent/tools/practice.ts";
+import { proberGraphTools } from "../../agent/tools/graph.ts";
+import { healToolRecord } from "../../agent/tools/heal.ts";
+import { activeProblemOf, type LhMessage } from "../../core/native-messages.ts";
+import { isSetupId } from "./setups.ts";
 
 /**
  * LearnHarness's own tools, served to Claude Code through the MCP proxy
@@ -40,16 +46,58 @@ export interface McpCallResult {
 	isError?: boolean;
 }
 
-type Phase = "probe" | "teach";
+type Phase = "probe" | "teach" | "practice";
 
 const PROBE_TOOLS = ["probe", "recall", "ask_user_question", "probe_done", "list_sessions", "list_propositions"];
 const TEACH_TOOLS = ["quiz", "explain", "ask_user_question", "plan_init"];
 
 const noop = () => undefined;
 
+/** The practice gate, per chat, across calls (the pi engine keeps it per
+ *  turn in a closure; here each MCP call rebuilds the registry, and the record
+ *  lags the transcript, so the gate lives server-side). Reseeded from the
+ *  record at every turn start (agent.ts), which carries any dismissal. */
+const gates = ((globalThis as { __lhCcPracticeGates?: Map<string, PracticeGate> }).__lhCcPracticeGates ??= new Map());
+
+export function reseedPracticeGate(chatId: string, messages: readonly LhMessage[]): void {
+	gates.set(chatId, { problemActive: activeProblemOf(messages) !== null });
+}
+
+function practiceGate(chatId: string): PracticeGate {
+	let gate = gates.get(chatId);
+	if (!gate) {
+		const record = stores.chatStore.getChat(chatId);
+		gate = { problemActive: record ? activeProblemOf(record.messages) !== null : false };
+		gates.set(chatId, gate);
+	}
+	return gate;
+}
+
+/** A practice session's registry (docs/blocks-and-courses.md decision 10):
+ *  the practice agent's own tools; the read and job tools are Claude Code's. */
+function practiceRegistry(chatId: string): Map<string, { tool: AgentTool<any>; phases: Phase[] }> {
+	const effective = effectiveSettings();
+	const gate = practiceGate(chatId);
+	const tools = healToolRecord({
+		problem: problemTool(gate, () => stores.graphStore.readNodes()),
+		conclude: concludeTool(gate),
+		...(graphToolsEnabled(effective) ? proberGraphTools({ chatStore: stores.chatStore, graphStore: stores.graphStore }) : {}),
+	});
+	const out = new Map<string, { tool: AgentTool<any>; phases: Phase[] }>();
+	for (const name of ["problem", "conclude", "list_sessions", "list_propositions"]) {
+		if (tools[name]) out.set(name, { tool: tools[name], phases: ["practice"] });
+	}
+	return out;
+}
+
+function isPractice(chatId: string): boolean {
+	return stores.chatStore.getChat(chatId)?.kind === "practice";
+}
+
 /** The union registry for one chat: each tool tagged with the phase(s) it
  *  belongs to. Built per call — the tools read live settings and the record. */
 function registry(chatId: string): Map<string, { tool: AgentTool<any>; phases: Phase[] }> {
+	if (isPractice(chatId)) return practiceRegistry(chatId);
 	const effective = effectiveSettings();
 	const enabled = effective.agent.tools;
 	const prober = createProberTools(
@@ -84,13 +132,16 @@ function registry(chatId: string): Map<string, { tool: AgentTool<any>; phases: P
 /** probe_done's result reaches the record only once the transcript is read;
  *  the side channel knows the moment it succeeded. */
 function phaseOf(chatId: string): Phase {
+	if (isPractice(chatId)) return "practice";
 	return hasProbeDone(liveMessages(chatId)) || hasToolSuccess(chatId, "probe_done") ? "teach" : "probe";
 }
 
 export function listTools(chatId: string): McpToolDef[] {
+	if (isSetupId(chatId)) return courseToolList();
 	const defs: McpToolDef[] = [];
 	for (const [name, { tool, phases }] of registry(chatId)) {
-		const tag = phases.length === 2 ? "" : phases[0] === "probe" ? "[Probe phase only] " : "[Teach phase only] ";
+		const tag =
+			phases.length === 2 || phases[0] === "practice" ? "" : phases[0] === "probe" ? "[Probe phase only] " : "[Teach phase only] ";
 		const description = tag + tool.description;
 		defs.push({ name, description, inputSchema: JSON.parse(JSON.stringify(tool.parameters)) });
 	}
@@ -104,6 +155,7 @@ function text(t: string, isError = false): McpCallResult {
 export type CallOutcome = { result: McpCallResult };
 
 export async function callTool(chatId: string, name: string, args: unknown): Promise<CallOutcome> {
+	if (isSetupId(chatId)) return { result: await callCourseTool(chatId, name, args) };
 	if (isStageTool(name)) return { result: await callStageTool(chatId, name, args) };
 	const entry = registry(chatId).get(name);
 	if (!entry) return { result: text(`Unknown tool: ${name}`, true) };
@@ -135,6 +187,16 @@ export async function callTool(chatId: string, name: string, args: unknown): Pro
 	}
 	const resultText = out.content.map((c) => (c.type === "text" ? c.text : "")).join("");
 	const isError = (out as { isError?: boolean }).isError === true;
+	if (name === "problem" && !isError) {
+		// The record keeps LearnHarness's own "posed" result (the practice dock
+		// keys on it); Claude Code is told to end its turn.
+		storeToolResult(chatId, name, args, resultText, out.details, isError);
+		return {
+			result: text(
+				"Problem posed — it is on the learner's screen now. End your turn now, writing nothing more: his thinking arrives as his next message.",
+			),
+		};
+	}
 	if (isQuestionTool(name) && !isError) {
 		return {
 			result: text(

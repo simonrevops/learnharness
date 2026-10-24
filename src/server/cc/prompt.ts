@@ -2,6 +2,7 @@ import { effectivePromptSegments } from "../../agent/prompt-segments.ts";
 import { quizMechanics } from "../../agent/tools.ts";
 import { effectiveSettings } from "../stores.ts";
 import { MAINTENANCE_PREFIX } from "./env.ts";
+import { NEXT_PROBLEM_TEXT, THINKING_LABEL } from "../../core/contracts/chat.ts";
 
 /**
  * The Claude Code session's system prompt. The pi engine runs two agents
@@ -37,7 +38,8 @@ You run inside Claude Code, but you are not a coding assistant here: you are the
 **App messages.** A prompt that starts with \`${MAINTENANCE_PREFIX}\` comes from the LearnHarness app, not the learner: do exactly what it asks, and keep any reply to one line.`;
 }
 
-export function composeClaudeCodeInstructions(): string {
+export function composeClaudeCodeInstructions(kind: "teach" | "practice" = "teach"): string {
+	if (kind === "practice") return composePracticeInstructions();
 	const switches = effectiveSettings().agent.prompts ?? {};
 	const text = (s: { enabled: boolean; overrideText: string | null; sourceText: string }) =>
 		(s.enabled ? s.overrideText! : s.sourceText).trim();
@@ -57,4 +59,46 @@ export function composeClaudeCodeInstructions(): string {
 	]
 		.filter(Boolean)
 		.join("\n\n---\n\n");
+}
+
+function practiceEngineNotes(): string {
+	return `# How this session runs
+
+You run inside Claude Code, but you are not a coding assistant here: you are the LearnHarness practice agent described below. The learner works in the LearnHarness window, which renders your Markdown and LaTeX — never through this terminal. Your messages are what he reads.
+
+**Tools.** \`problem\` and \`conclude\` come from the \`lh\` server: call them as \`mcp__lh__problem\` and \`mcp__lh__conclude\` (the map readers, when present, are \`mcp__lh__list_sessions\` and \`mcp__lh__list_propositions\`). There are no research or pdf job tools in this session: check facts with WebSearch/WebFetch yourself, and read files and PDFs directly with Read, Glob and Grep.
+
+**Posing.** \`problem\` returns at once and tells you to end your turn — end it right there, writing nothing more. His thinking arrives as his next message, starting "${THINKING_LABEL}:". His go-ahead for the next problem arrives as the message "${NEXT_PROBLEM_TEXT}". If he discards a problem, a message says so: treat that problem as concluded with outcome "dismissed" (you call nothing for it).
+
+**App messages.** A prompt that starts with \`${MAINTENANCE_PREFIX}\` comes from the LearnHarness app, not the learner: do exactly what it asks, and keep any reply to one line.`;
+}
+
+/** The practice session's prompt: LearnHarness's practice doctrine (its own
+ *  directory plus the curated shared fragments), with the engine notes. */
+export function composePracticeInstructions(): string {
+	const switches = effectiveSettings().agent.prompts ?? {};
+	const segs = effectivePromptSegments("practice", switches);
+	const text = (s: (typeof segs)[number]) => (s.enabled ? s.overrideText! : s.sourceText).trim();
+	const own = segs.filter((s) => s.path.startsWith("practice/")).map(text).filter(Boolean);
+	const shared = segs.filter((s) => s.path.startsWith("shared/")).map(text).filter(Boolean);
+	return [own[0] ?? "", practiceEngineNotes(), ...own.slice(1), ...shared].filter(Boolean).join("\n\n---\n\n");
+}
+
+/** The course-reading run's prompt (docs/blocks-and-courses.md decision 2). */
+export function composeCourseSetupInstructions(folder: string, root: string | null, today: string): string {
+	return `# Read a course folder for LearnHarness
+
+You run inside Claude Code for LearnHarness, a tutoring app. Your one job in this session: read the course folder \`${folder}\` and save what a tutor needs to know about the course, by calling \`mcp__lh__course_save\` once. Today is ${today}.
+
+You can read the folder (Read, Glob, Grep; Read opens PDFs)${root ? `, and also \`${root}\` — the learner's other course material, which may hold term facts or notes about this course` : ""}. You cannot change any file.
+
+Find:
+
+- **The course name** as the course itself states it.
+- **A summary**: one paragraph on what the course is, how it is assessed, and what the assessments reward (for example: no-aids quizzes reward fluent recall; an all-aids exam rewards working problems fast with prepared notes).
+- **The teaching weeks**: number, the Monday each week starts (YYYY-MM-DD), the topics in the course's own words and section numbers, and where that week's material sits in the folder. A teaching break is a gap between week start dates — never a week of its own. If only a term start is given, derive the weeks from it and from any break the material mentions.
+- **The assessments**: each exam, quiz and hand-in with its date (YYYY-MM-DD), time if stated, weight in percent, aids allowed (none, some, all) and a one-line format.
+- **The files a tutor should read first** at the start of any session (an index, a handoff or progress note, a scorecard, a syllabus), as paths relative to the course folder.
+
+Prefer the folder's own index, syllabus or plan files over guessing from file names. Never invent: leave out a weight or a time the folder doesn't state. When you're done, call \`mcp__lh__course_save\` once, then reply with one line saying what you saved, and stop.`;
 }

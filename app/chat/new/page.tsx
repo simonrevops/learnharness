@@ -1,5 +1,5 @@
 import { NewSession } from "@/components/new-session";
-import { readSettingsRecord } from "@/src/server";
+import { readSettingsRecord, sessionCourseFor, listCourses } from "@/src/server";
 import { slotsConfigured } from "@/src/core";
 
 export const dynamic = "force-dynamic";
@@ -18,13 +18,19 @@ export const dynamic = "force-dynamic";
 export default async function NewSessionPage({
 	searchParams,
 }: {
-	searchParams: Promise<{ mode?: string }>;
+	searchParams: Promise<{ mode?: string; course?: string; text?: string }>;
 }) {
-	const { mode } = await searchParams;
+	const { mode, course: courseId, text } = await searchParams;
+	// A course card's draft (fork, docs/blocks-and-courses.md): the session
+	// will belong to the course; the label names the course and its week.
+	const link = courseId ? sessionCourseFor(courseId) : undefined;
+	const name = link ? listCourses().find((c) => c.id === link.id)?.name : undefined;
 	return (
 		<NewSession
 			initialConfigured={slotsConfigured(readSettingsRecord()?.models)}
 			mode={mode === "practice" ? "practice" : "teach"}
+			{...(link && name ? { course: { id: link.id, label: link.week ? `${name} · week ${link.week}` : name } } : {})}
+			initialText={typeof text === "string" ? text : ""}
 		/>
 	);
 }

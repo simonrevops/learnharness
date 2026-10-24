@@ -10,6 +10,7 @@ import type { LhMessage } from "../native-messages.ts";
 import type { Phase3 } from "../phases.ts";
 import type { PlanNodeStatus, PlanTree } from "./plan.ts";
 import type { EmissionStats } from "./graph.ts";
+import type { SessionCourse } from "../courses.ts";
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
@@ -35,6 +36,9 @@ export interface ChatRecord {
 	messages: LhMessage[];
 	/** The session's kind — absent = teach (pre-practice records). */
 	kind?: ChatKind;
+	/** The course and block week the session belongs to (fork, stage 2 —
+	 *  docs/blocks-and-courses.md); absent = a free-standing session. */
+	course?: SessionCourse;
 	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
 	tree?: PlanTree;
 	/** Append-only usage log (observability, 2026-09): one entry per model
@@ -260,6 +264,8 @@ export interface ChatSummary {
 	updatedAt: string;
 	/** Normalized kind (absent record field reads as teach). */
 	kind: ChatKind;
+	/** The session's course link (fork, stage 2), when it has one. */
+	course?: SessionCourse;
 	messageCount: number;
 	/** The session's current phase, derived from the stored plan tree. */
 	phase: Phase3;

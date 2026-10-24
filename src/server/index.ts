@@ -46,3 +46,6 @@ export * from "./model-catalog.ts";
 
 // The Claude Code engine (fork, docs/claude-code-engine.md).
 export * from "./cc/index.ts";
+// Blocks and courses (fork, docs/blocks-and-courses.md).
+export * from "./courses.ts";
+export { saveBlock, blockFolders, getBlock } from "../store/courses.ts";
