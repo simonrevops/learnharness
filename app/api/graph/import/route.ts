@@ -13,7 +13,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { CC_ENGINE, extraction, NotesImportError } from "@/src/server";
+import { CC_ENGINE, extraction, ImportBusyError, importViaClaudeCode, NotesImportError } from "@/src/server";
 import {
 	ModelsNotConfiguredError,
 	PROVIDER_KEY_MISSING_CODE,
@@ -41,13 +41,38 @@ interface ImportResult {
 }
 
 export async function POST(request: Request) {
-	// Claude Code engine (fork): notes imports have no lesson session to work
-	// the extraction stages yet.
-	if (CC_ENGINE) return Response.json({ error: "Notes import is not available with the Claude Code engine yet" }, { status: 501 });
 	const form = await request.formData();
 	const files = form.getAll("files").filter((f): f is File => f instanceof File);
 	if (files.length === 0) {
 		return Response.json({ results: [] as ImportResult[], error: "no files" }, { status: 400 });
+	}
+	// Claude Code engine (fork): a notes import gets a Claude Code worker
+	// session to work its extraction stages (cc/notes-import.ts).
+	if (CC_ENGINE) {
+		try {
+			const out = await importViaClaudeCode(
+				"notes",
+				"Import notes",
+				await Promise.all(files.map(async (f) => ({ filePath: f.name, text: await f.text() }))),
+			);
+			return Response.json({
+				results: out.map((r, requestIndex): ImportResult => ({
+					requestIndex,
+					filePath: r.filePath,
+					ok: r.ok,
+					outcome: r.ok ? "completed" : "failed",
+					...(r.stats ? { stats: r.stats } : {}),
+					...(r.error ? { error: r.error } : {}),
+				})),
+			});
+		} catch (err) {
+			if (err instanceof ImportBusyError) {
+				return Response.json({
+					results: files.map((f, requestIndex): ImportResult => ({ requestIndex, filePath: f.name, ok: false, outcome: "busy", error: err.message })),
+				});
+			}
+			throw err;
+		}
 	}
 
 	const results: ImportResult[] = [];

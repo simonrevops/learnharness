@@ -21,8 +21,25 @@ This works with the Claude Code engine (docs/claude-code-engine.md).
 10. **Practice sessions run under the Claude Code engine.** Claude Code itself does the practising, not a separate model call. The practice tools (`problem`, `conclude`) are served over MCP like the teaching tools. A posed problem ends Claude Code's turn, the same as a posed question. The learner's thinking, the next-problem signal and dismissals reach Claude Code as typed messages.
 11. **No writes to the course folders.** The learner's own handoff and scorecard files stay theirs. LearnHarness's continuity is its knowledge graph and session records.
 
-## Not in stage 2
+## Stage 3 — exam prep
+
+12. **Assessments can be marked done.** The mark lives apart from the drafted course (`data/course-progress.json`), so re-reading a course keeps it. A done assessment drops out of the next step.
+13. **Notes import runs on Claude Code.** An import gets a Claude Code worker session of its own (`import_<key>`, a Terminal tab). LearnHarness's pipeline runs unchanged, its extractor and auditor jobs go to the worker, and the worker's graph-extractor subagent works them. A job nobody is working fails at once instead of hanging. This serves both the existing "Import notes" button and a per-course import of the learner's own notes: text files under `Notes/` and `Solutions/Mine/`, plus the block root's `_shared/`. Lecture PDFs and textbooks stay out, because they are the course's material, not what the learner has worked through.
+14. **A course's points** are the propositions that came up in its sessions or in notes imported from its folder. A course practice session with nothing picked opens on up to 64 of them, newest first, so practice stays inside the course. The course card's "N points in the graph" puts them in the chain table, picked.
+15. **Mock exams.** "Mock exam" appears on a course card when an exam or quiz is within 14 days. It starts a practice session with the assessment's length, read from its format line (two hours if the line doesn't say). The whole paper is posed as one problem, there are no hints during the mock, and the marking per sub-question is the verdict at the end. The clock starts when the paper is posed: the header shows minutes used, and each learner message carries the clock for Claude Code.
+16. **The graph updates itself after a lesson.** Once a teaching session has been quiet for 15 minutes, its graph update runs, as a maintenance turn the record never shows. It runs only while the lesson's Claude Code tab is still open, so a closed tab is never reopened for it. Any new turn resets the wait. Extract still works on demand.
+
+## Stage 4 — continuity
+
+17. **Write-back is opt-in, per course.** This revises decision 11. When the learner ticks "Let sessions update my …" on a course card, that course's sessions (never mock exams) may edit the course's read-first files that already exist inside its folder, and nothing else. Claude Code gets the Edit tool with one allow rule per file and runs in `dontAsk` mode, so anything not allowed is refused without a prompt (checked against a real Claude Code session). The tutor updates them when the learner says he is done, and in the after-lesson maintenance turn.
+
+## Stage 5 — the next block
+
+18. **A new block is a new folder.** "change" on the panel points LearnHarness at the next block's folder; each course there is read once. Earlier courses' records stay in `data/courses/`, and their points stay in the graph.
+
+## Not built
 
 - Editing a course's weeks by hand in the app (re-read the folder instead, or edit `data/courses/<id>.json`).
-- Several blocks at once, or a block history.
+- Highlighting a course's points on the graph canvas itself (the course lens uses the chain table).
+- Research, demo, visual and PDF jobs under the Claude Code engine: Claude Code reads PDFs and searches the web itself, and the interactive demos and visuals aren't wired yet.
 - Calendar reminders.

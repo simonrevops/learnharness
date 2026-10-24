@@ -57,6 +57,7 @@ import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
+import { MockClock } from "@/components/mock-clock";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, TurnUsage } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
@@ -68,6 +69,7 @@ import {
 import { CoverageRing } from "@/components/extraction-coverage";
 import {
 	activeProblemOf,
+	mockStartedAt,
 	dismissedAnswer,
 	findPendingToolCall,
 	phaseAt3,
@@ -203,7 +205,10 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	mock,
 }: {
+	/** A mock exam session (fork, stage 3): the header carries its clock. */
+	mock?: { assessment: string; minutes: number };
 	chatId: string;
 	title: string;
 	initialMessages: LhMessage[];
@@ -1295,6 +1300,7 @@ export function Chat({
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
+					{mock && <MockClock minutes={mock.minutes} startedAt={mockStartedAt(nativeMessages as never)} />}
 					{kind === "practice" ? (
 						<span
 							data-testid="phase-chip"

@@ -13,6 +13,62 @@ import type { BlockConfig, Course } from "../core/courses.ts";
 
 const COURSES_DIR = path.join(PATHS.data, "courses");
 const BLOCK_FILE = path.join(PATHS.data, "block.json");
+/** What the learner marked done, per course — apart from the drafted course
+ *  files, which a re-read overwrites. */
+const PROGRESS_FILE = path.join(PATHS.data, "course-progress.json");
+
+type Progress = Record<string, { done: string[]; notesImportedAt?: string; writeBack?: boolean }>;
+
+function readProgress(): Progress {
+	try {
+		return JSON.parse(fs.readFileSync(PROGRESS_FILE, "utf-8")) as Progress;
+	} catch {
+		return {};
+	}
+}
+
+export function setAssessmentDone(courseId: string, name: string, done: boolean): void {
+	const p = readProgress();
+	const set = new Set(p[courseId]?.done ?? []);
+	if (done) set.add(name);
+	else set.delete(name);
+	p[courseId] = { ...p[courseId], done: [...set].sort() };
+	fs.mkdirSync(PATHS.data, { recursive: true });
+	fs.writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, "\t"), "utf-8");
+}
+
+export function recordNotesImport(courseId: string, at: string): void {
+	const p = readProgress();
+	p[courseId] = { ...p[courseId], done: p[courseId]?.done ?? [], notesImportedAt: at };
+	fs.mkdirSync(PATHS.data, { recursive: true });
+	fs.writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, "\t"), "utf-8");
+}
+
+/** The learner's opt-in: course sessions may update his own progress files
+ *  (stage 4 — off unless he turns it on). */
+export function setWriteBack(courseId: string, on: boolean): void {
+	const p = readProgress();
+	p[courseId] = { done: p[courseId]?.done ?? [], ...p[courseId], writeBack: on };
+	fs.mkdirSync(PATHS.data, { recursive: true });
+	fs.writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, "\t"), "utf-8");
+}
+
+export function writeBackEnabled(courseId: string): boolean {
+	return readProgress()[courseId]?.writeBack === true;
+}
+
+/** The files write-back may edit: the course's read-first files that sit
+ *  inside its folder and exist (never anything outside it, never new files). */
+export function writeBackFiles(course: Course): string[] {
+	const prefix = course.folder.endsWith(path.sep) ? course.folder : course.folder + path.sep;
+	return course.readFirst
+		.map((f) => path.resolve(course.folder, f))
+		.filter((f) => f.startsWith(prefix) && fs.existsSync(f));
+}
+
+export function notesImportedAt(courseId: string): string | null {
+	return readProgress()[courseId]?.notesImportedAt ?? null;
+}
 
 function courseFile(id: string): string {
 	if (!/^[a-z0-9-]+$/.test(id)) throw new Error(`Invalid course id: ${id}`);
@@ -20,11 +76,14 @@ function courseFile(id: string): string {
 }
 
 export function getCourse(id: string): Course | null {
+	let course: Course;
 	try {
-		return JSON.parse(fs.readFileSync(courseFile(id), "utf-8")) as Course;
+		course = JSON.parse(fs.readFileSync(courseFile(id), "utf-8")) as Course;
 	} catch {
 		return null;
 	}
+	const done = new Set(readProgress()[id]?.done ?? []);
+	return { ...course, assessments: course.assessments.map((a) => (done.has(a.name) ? { ...a, done: true } : a)) };
 }
 
 export function listCourses(): Course[] {
@@ -42,7 +101,8 @@ export function listCourses(): Course[] {
 
 export function saveCourse(course: Course): void {
 	fs.mkdirSync(COURSES_DIR, { recursive: true });
-	fs.writeFileSync(courseFile(course.id), JSON.stringify(course, null, "\t"), "utf-8");
+	const stored = { ...course, assessments: course.assessments.map(({ done: _done, ...a }) => a) };
+	fs.writeFileSync(courseFile(course.id), JSON.stringify(stored, null, "\t"), "utf-8");
 }
 
 /** `~` and relative paths resolve against the home directory. */

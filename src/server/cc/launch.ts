@@ -1,8 +1,8 @@
-import { courseBrief, isoDay } from "../../core/courses.ts";
-import { blockRoot, getBlock, getCourse } from "../../store/courses.ts";
+import { courseBrief, isoDay, mockBrief } from "../../core/courses.ts";
+import { blockRoot, getBlock, getCourse, writeBackEnabled, writeBackFiles } from "../../store/courses.ts";
 import { stores } from "../stores.ts";
-import { composeClaudeCodeInstructions, composeCourseSetupInstructions } from "./prompt.ts";
-import { isSetupId, readSetup } from "./setups.ts";
+import { composeClaudeCodeInstructions, composeCourseSetupInstructions, composeImportWorkerInstructions } from "./prompt.ts";
+import { isImportWorkerId, isSetupId, readSetup } from "./setups.ts";
 
 /**
  * What a Claude Code session launches with: its system prompt and the extra
@@ -14,10 +14,13 @@ import { isSetupId, readSetup } from "./setups.ts";
 export interface LaunchSpec {
 	prompt: string;
 	addDirs: string[];
+	/** Existing files the session may edit (write-back, opt-in per course). */
+	editFiles?: string[];
 }
 
 export function launchSpecFor(chatId: string): LaunchSpec {
 	const today = isoDay();
+	if (isImportWorkerId(chatId)) return { prompt: composeImportWorkerInstructions(), addDirs: [] };
 	if (isSetupId(chatId)) {
 		const setup = readSetup(chatId);
 		if (!setup) throw new Error(`No course-reading run is registered for ${chatId}`);
@@ -32,8 +35,12 @@ export function launchSpecFor(chatId: string): LaunchSpec {
 	if (!course) return { prompt, addDirs: [] };
 	const block = getBlock();
 	const root = block ? blockRoot(block) : null;
+	// Write-back (opt-in): never in a mock exam.
+	const editFiles = writeBackEnabled(course.id) && !record?.mock ? writeBackFiles(course) : [];
+	const mock = record?.mock ? `\n\n---\n\n${mockBrief(record.mock, course.assessments.find((a) => a.name === record.mock!.assessment))}` : "";
 	return {
-		prompt: `${prompt}\n\n---\n\n${courseBrief(course, today, root)}`,
+		prompt: `${prompt}\n\n---\n\n${courseBrief(course, today, root, editFiles)}${mock}`,
 		addDirs: [course.folder, ...(root ? [root] : [])],
+		...(editFiles.length > 0 ? { editFiles } : {}),
 	};
 }

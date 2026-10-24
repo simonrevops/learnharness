@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon, DumbbellIcon, RefreshCwIcon } from "lucide-react";
+import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon, DumbbellIcon, RefreshCwIcon, TimerIcon } from "lucide-react";
 import { startDraftSession } from "@/components/new-session";
-import type { BlockOverview, CourseCard } from "@/src/core";
+import { EXAM_PREP_DAYS, mockMinutes, type BlockOverview, type CourseCard } from "@/src/core";
 
 /**
  * The block panel (fork, stage 2 — docs/blocks-and-courses.md decision 9):
@@ -47,13 +47,19 @@ const AIDS_LABEL = { none: "no aids", some: "some aids", all: "all aids" } as co
 const BUTTON =
 	"inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent disabled:cursor-default disabled:opacity-60";
 
-export function BlockPanel() {
+export function BlockPanel({
+	onShowCourse,
+}: {
+	/** Show a course's propositions on the home screen (the course lens). */
+	onShowCourse?: (points: CourseCard["graphPoints"]) => void;
+}) {
 	const router = useRouter();
 	const [data, setData] = useState<BlockOverview | null>(null);
 	const [collapsed, setCollapsed] = useState(false);
 	const [folder, setFolder] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [starting, setStarting] = useState<string | null>(null);
+	const [changing, setChanging] = useState(false);
 
 	useEffect(() => setCollapsed(readCollapsed()), []);
 
@@ -66,7 +72,7 @@ export function BlockPanel() {
 		}
 	}, []);
 
-	const reading = data?.cards.some((c) => c.reading) ?? false;
+	const reading = data?.cards.some((c) => c.reading || c.importing) ?? false;
 	useEffect(() => {
 		void load();
 		const t = setInterval(() => void load(), reading ? 4000 : 60_000);
@@ -81,12 +87,23 @@ export function BlockPanel() {
 		else setData(json);
 	};
 
-	const start = async (card: CourseCard) => {
+	const start = async (card: CourseCard, mock?: boolean) => {
 		const s = card.suggestion;
+		const next = card.next?.assessment;
 		if (!s || starting) return;
+		if (mock && !next) return;
 		setStarting(card.courseId);
 		try {
-			const target = await startDraftSession(s.prompt, fetch, s.mode === "practice" ? "practice" : undefined, undefined, card.courseId);
+			const target = mock
+				? await startDraftSession(
+						`${card.course?.name}: mock exam for ${next!.name}, ${mockMinutes(next!)} minutes.`,
+						fetch,
+						"practice",
+						undefined,
+						card.courseId,
+						{ assessment: next!.name, minutes: mockMinutes(next!) },
+					)
+				: await startDraftSession(s.prompt, fetch, s.mode === "practice" ? "practice" : undefined, undefined, card.courseId);
 			if (target) router.push(target);
 		} finally {
 			setStarting(null);
@@ -95,7 +112,7 @@ export function BlockPanel() {
 
 	if (!data) return null;
 
-	if (!data.block) {
+	if (!data.block || changing) {
 		return (
 			<div className="w-80 rounded-xl border bg-card/90 p-3 shadow-lg backdrop-blur" data-testid="block-panel">
 				<div className="font-ui text-xs font-medium text-foreground">Your block</div>
@@ -106,7 +123,7 @@ export function BlockPanel() {
 					className="mt-2 flex gap-1.5"
 					onSubmit={(e) => {
 						e.preventDefault();
-						if (folder.trim()) void post("/api/courses/block", "PUT", { folder });
+						if (folder.trim()) void post("/api/courses/block", "PUT", { folder }).then(() => setChanging(false));
 					}}
 				>
 					<input
@@ -120,6 +137,11 @@ export function BlockPanel() {
 					</button>
 				</form>
 				{error && <p className="mt-1.5 font-ui text-xs text-destructive">{error}</p>}
+				{changing && (
+					<button type="button" onClick={() => setChanging(false)} className="mt-1.5 cursor-pointer font-ui text-xs text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground">
+						Keep {data.block?.folder}
+					</button>
+				)}
 			</div>
 		);
 	}
@@ -145,6 +167,20 @@ export function BlockPanel() {
 			</button>
 			{!collapsed && (
 				<div className="flex flex-col gap-2 px-3 pb-3">
+					<p className="font-ui text-xs text-muted-foreground">
+						<span className="truncate">{data.block.folder}</span> ·{" "}
+						<button
+							type="button"
+							onClick={() => {
+								setFolder(data.block?.folder ?? "");
+								setChanging(true);
+							}}
+							title="A new block: point at the folder with the next courses"
+							className="cursor-pointer underline decoration-dotted underline-offset-2 hover:text-foreground"
+						>
+							change
+						</button>
+					</p>
 					{data.cards.length === 0 && (
 						<p className="font-ui text-xs text-muted-foreground">No course folders in {data.block.folder}.</p>
 					)}
@@ -154,7 +190,12 @@ export function BlockPanel() {
 							card={card}
 							starting={starting === card.courseId}
 							onStart={() => void start(card)}
+							onMock={() => void start(card, true)}
+							onShowCourse={onShowCourse ? () => onShowCourse(card.graphPoints) : undefined}
+							onWriteBack={(on) => void post("/api/courses/write-back", "POST", { courseId: card.courseId, on })}
 							onRead={() => void post("/api/courses/read", "POST", { folder: card.folder })}
+							onImport={() => void post("/api/courses/import", "POST", { courseId: card.courseId })}
+							onDone={(name) => void post("/api/courses/assessment", "POST", { courseId: card.courseId, name, done: true })}
 						/>
 					))}
 					{error && <p className="font-ui text-xs text-destructive">{error}</p>}
@@ -169,11 +210,21 @@ function CourseCardView({
 	starting,
 	onStart,
 	onRead,
+	onDone,
+	onImport,
+	onMock,
+	onWriteBack,
+	onShowCourse,
 }: {
+	onWriteBack: (on: boolean) => void;
+	onShowCourse?: () => void;
+	onImport: () => void;
+	onMock: () => void;
 	card: CourseCard;
 	starting: boolean;
 	onStart: () => void;
 	onRead: () => void;
+	onDone: (assessment: string) => void;
 }) {
 	const { course } = card;
 	if (!course || card.reading) {
@@ -222,17 +273,70 @@ function CourseCardView({
 			{next && (
 				<p className="mt-1 font-ui text-xs text-muted-foreground">
 					<span className="text-foreground">{next.assessment.name}</span> · {formatDay(next.assessment.date)} ·{" "}
-					{daysLeftLabel(next.daysLeft)} · {AIDS_LABEL[next.assessment.aids]}
+					{daysLeftLabel(next.daysLeft)} · {AIDS_LABEL[next.assessment.aids]}{" "}
+					<button
+						type="button"
+						onClick={() => onDone(next.assessment.name)}
+						title="Mark it done — the next step moves on"
+						className="cursor-pointer underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground"
+					>
+						mark done
+					</button>
 				</p>
 			)}
 			<p className="mt-1 font-ui text-xs text-muted-foreground">
 				This week: {card.lessonsThisWeek} {card.lessonsThisWeek === 1 ? "lesson" : "lessons"}, {card.practiceThisWeek} practice
 			</p>
+			<p className="mt-1 font-ui text-xs text-muted-foreground">
+				{card.importing ? (
+					<>Adding your notes to the graph… {card.importing.done}/{card.importing.total} files</>
+				) : (
+					<>
+						{card.graphPoints.length > 0 && onShowCourse && (
+							<>
+								<button
+									type="button"
+									onClick={onShowCourse}
+									title="Show this course's points in the chain table, picked — ready to practise"
+									className="cursor-pointer underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground"
+								>
+									{card.graphPoints.length} points in the graph
+								</button>{" "}
+								·{" "}
+							</>
+						)}
+						{card.notesImportedAt ? `notes imported ${formatDay(card.notesImportedAt.slice(0, 10))}` : "notes not imported"} ·{" "}
+						<button
+							type="button"
+							onClick={onImport}
+							title="Claude Code reads your Notes and Solutions/Mine files into the knowledge graph"
+							className="cursor-pointer underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground"
+						>
+							{card.notesImportedAt ? "import again" : "import notes"}
+						</button>
+					</>
+				)}
+			</p>
+			{card.writeBackFiles.length > 0 && (
+				<label
+					className="mt-1 flex cursor-pointer items-start gap-1.5 font-ui text-xs text-muted-foreground"
+					title={`Lessons and practice may edit: ${card.writeBackFiles.join(", ")}. Nothing else, and never new files.`}
+				>
+					<input type="checkbox" checked={card.writeBack} onChange={(e) => onWriteBack(e.target.checked)} className="mt-0.5 cursor-pointer" />
+					<span>Let sessions update my {card.writeBackFiles.join(", ")}</span>
+				</label>
+			)}
 			<div className="mt-2 flex flex-wrap items-center gap-1.5">
 				{s && (
 					<button type="button" onClick={onStart} disabled={starting} className={`${BUTTON} border-muted-foreground/40`}>
 						{s.mode === "practice" ? <DumbbellIcon className="size-3" /> : <BookOpenIcon className="size-3" />}
 						{starting ? "Starting…" : s.label}
+					</button>
+				)}
+				{next && next.assessment.kind !== "assignment" && next.daysLeft <= EXAM_PREP_DAYS && (
+					<button type="button" onClick={onMock} disabled={starting} className={BUTTON} title={`A timed mock of ${next.assessment.name}, marked at the end`}>
+						<TimerIcon className="size-3" />
+						Mock exam
 					</button>
 				)}
 				<Link href={draft("teach", cw ? `${course.name}, week ${cw.week}: ${cw.topics}` : `${course.name}: `)} className={BUTTON} title="A lesson — edit the topic first">

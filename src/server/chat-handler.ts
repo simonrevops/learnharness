@@ -56,6 +56,7 @@ import type {CallUsage, SteerMessage} from "../core/contracts.ts";
 import { CC_ENGINE } from "./cc/env.ts";
 import { ClaudeCodeAgent } from "./cc/agent.ts";
 import { claudeCodeSubmitRunner } from "./cc/stage.ts";
+import { cancelAutoGraphUpdate, scheduleAutoGraphUpdate } from "./cc/auto-update.ts";
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -288,6 +289,8 @@ export async function handleChatInput(
 	// One turn per chat, ever. A second request while a turn runs means a
 	// stale/remounted client raced a live one — letting it through would
 	// double-run the teacher and clobber the first turn's persist.
+	// A new turn means the lesson isn't over: no automatic graph update yet.
+	if (CC_ENGINE) cancelAutoGraphUpdate(chatId);
 	if (!beginTurn(chatId)) {
 		console.info(`[chat ${chatId}] turn already in flight — request rejected`);
 		return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
@@ -376,6 +379,7 @@ export async function handleChatInput(
 				title: record.title ?? "Lesson",
 				messages: asAgentMessages(merged),
 				onUsage: collectUsage,
+				...(record.mock ? { mock: record.mock } : {}),
 			}) as unknown as TeachingAgent)
 		: buildAgent
 		? buildAgent({ ...agentOpts, teaching })
@@ -502,8 +506,12 @@ export async function handleChatInput(
 				// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
 				// no extraction, no graph, no coverage (v1: the session itself
 				// is the deliverable).
-				// Claude Code engine: the graph updates after the lesson, on request
-				// (the Extract action) — never mid-lesson behind the learner's back.
+				// Claude Code engine: the graph updates after the lesson — on request
+				// (the Extract action), or by itself once the lesson has been quiet
+				// for 15 minutes — never mid-lesson behind the learner's back.
+				if (CC_ENGINE && record.kind !== "practice" && extractionEnabled(effective.graph)) {
+					scheduleAutoGraphUpdate(chatId);
+				}
 				if (!CC_ENGINE && record.kind !== "practice" && extractionEnabled(effective.graph)) {
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares

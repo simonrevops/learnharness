@@ -10,7 +10,7 @@ import type { LhMessage } from "../native-messages.ts";
 import type { Phase3 } from "../phases.ts";
 import type { PlanNodeStatus, PlanTree } from "./plan.ts";
 import type { EmissionStats } from "./graph.ts";
-import type { SessionCourse } from "../courses.ts";
+import type { MockExam, SessionCourse } from "../courses.ts";
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
@@ -39,6 +39,8 @@ export interface ChatRecord {
 	/** The course and block week the session belongs to (fork, stage 2 —
 	 *  docs/blocks-and-courses.md); absent = a free-standing session. */
 	course?: SessionCourse;
+	/** A practice session run as a timed mock exam (fork, stage 3). */
+	mock?: MockExam;
 	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
 	tree?: PlanTree;
 	/** Append-only usage log (observability, 2026-09): one entry per model

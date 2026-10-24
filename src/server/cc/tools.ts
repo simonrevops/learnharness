@@ -18,7 +18,7 @@ import { concludeTool, problemTool, type PracticeGate } from "../../agent/tools/
 import { proberGraphTools } from "../../agent/tools/graph.ts";
 import { healToolRecord } from "../../agent/tools/heal.ts";
 import { activeProblemOf, type LhMessage } from "../../core/native-messages.ts";
-import { isSetupId } from "./setups.ts";
+import { isImportWorkerId, isSetupId } from "./setups.ts";
 
 /**
  * LearnHarness's own tools, served to Claude Code through the MCP proxy
@@ -138,6 +138,7 @@ function phaseOf(chatId: string): Phase {
 
 export function listTools(chatId: string): McpToolDef[] {
 	if (isSetupId(chatId)) return courseToolList();
+	if (isImportWorkerId(chatId)) return stageToolList();
 	const defs: McpToolDef[] = [];
 	for (const [name, { tool, phases }] of registry(chatId)) {
 		const tag =
@@ -157,6 +158,7 @@ export type CallOutcome = { result: McpCallResult };
 export async function callTool(chatId: string, name: string, args: unknown): Promise<CallOutcome> {
 	if (isSetupId(chatId)) return { result: await callCourseTool(chatId, name, args) };
 	if (isStageTool(name)) return { result: await callStageTool(chatId, name, args) };
+	if (isImportWorkerId(chatId)) return { result: text(`Unknown tool: ${name}`, true) };
 	const entry = registry(chatId).get(name);
 	if (!entry) return { result: text(`Unknown tool: ${name}`, true) };
 	const phase = phaseOf(chatId);

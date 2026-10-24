@@ -753,6 +753,12 @@ export interface NotesImportInput {
 	text: string;
 }
 
+/** A notes file's source id: deterministic per file path (it plays the
+ *  chatId role in mappings and checkpoints). */
+export function notesSourceId(filePath: string): string {
+	return `src_${crypto.createHash("sha256").update(filePath).digest("hex").slice(0, 12)}`;
+}
+
 /** A notes import did not finish. Earlier graph writes and billed usage are
  * retained; partialStats describe known merges, not an all-or-nothing result. */
 export class NotesImportError extends Error {
@@ -1428,7 +1434,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	/** Every explicit import processes the whole file. Identity, source digest,
 	 * auditor and usage history remain source-scoped; this is not exactly-once. */
 	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
-		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
+		const id = notesSourceId(input.filePath);
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
 		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
 		inFlight.add(id);

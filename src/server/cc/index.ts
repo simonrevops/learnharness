@@ -4,3 +4,4 @@ export { listTools, callTool } from "./tools.ts";
 export { startGraphUpdate } from "./graph-update.ts";
 export { focus as focusClaudeCode } from "./session.ts";
 export { startCourseRead } from "./course-setup.ts";
+export { importViaClaudeCode, importStatus, ImportBusyError } from "./notes-import.ts";

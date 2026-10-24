@@ -10,6 +10,12 @@ import { CC_SESSIONS_DIR } from "./env.ts";
  */
 
 export const SETUP_PREFIX = "course_";
+/** Notes-import worker sessions (cc/notes-import.ts). */
+export const IMPORT_PREFIX = "import_";
+
+export function isImportWorkerId(id: string): boolean {
+	return id.startsWith(IMPORT_PREFIX);
+}
 
 export interface SetupRecord {
 	id: string;

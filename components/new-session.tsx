@@ -46,6 +46,7 @@ export async function startDraftSession(
 	mode?: "practice",
 	picks?: readonly DraftPick[],
 	courseId?: string,
+	mock?: { assessment: string; minutes: number },
 ): Promise<string | null> {
 	const t = text.trim();
 	if (!t) return null;
@@ -62,6 +63,7 @@ export async function startDraftSession(
 				: { title: t }),
 			// The course link (fork, docs/blocks-and-courses.md).
 			...(courseId ? { courseId } : {}),
+			...(mock ? { mock } : {}),
 		}),
 	});
 	const { id } = (await res.json()) as { id: string };

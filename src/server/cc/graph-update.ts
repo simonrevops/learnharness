@@ -6,6 +6,7 @@ import { extractionStatuses } from "../../agent/subagents/extraction.ts";
 import { MAINTENANCE_PREFIX } from "./env.ts";
 import { deliver, liveProcess, sessionRecordFor, CcNotReadyError } from "./session.ts";
 import { beginStages, finishStages } from "./stage.ts";
+import { getCourse, writeBackEnabled, writeBackFiles } from "../../store/courses.ts";
 
 /**
  * "Update the graph" for a lesson (the session's Extract action). The
@@ -34,11 +35,19 @@ export async function startGraphUpdate(chatId: string): Promise<Response> {
 		.runExtraction(chatId)
 		.then((s) => finishStages(chatId, `Added ${s.nodes} node(s) and ${s.chains ?? 0} chain(s).`))
 		.catch((err: unknown) => finishStages(chatId, `The update failed: ${err instanceof Error ? err.message : String(err)}`));
+	// Write-back (opt-in, stage 4): the same maintenance turn keeps his
+	// progress files current.
+	const course = record.course && writeBackEnabled(record.course.id) && !record.mock ? getCourse(record.course.id) : null;
+	const files = course ? writeBackFiles(course) : [];
+	const writeBack =
+		files.length > 0
+			? ` After that, update his progress files (${files.map((f) => `\`${f}\``).join(", ")}) from this lesson, the way your instructions describe, and mention it in the same one line.`
+			: "";
 	try {
 		await deliver(
 			chatId,
 			record.title ?? "Lesson",
-			`${MAINTENANCE_PREFIX} Update the knowledge graph now: run the graph-extractor agent (Agent tool, subagent_type "graph-extractor") and wait until it reports DONE. Then reply with its one-line summary only.`,
+			`${MAINTENANCE_PREFIX} Update the knowledge graph now: run the graph-extractor agent (Agent tool, subagent_type "graph-extractor") and wait until it reports DONE. Then reply with its one-line summary only.${writeBack}`,
 		);
 	} catch (err) {
 		finishStages(chatId, "Claude Code could not be reached.");
@@ -59,3 +68,4 @@ export async function startGraphUpdate(chatId: string): Promise<Response> {
 	})();
 	return Response.json({ started: true }, { status: 202 });
 }
+

@@ -102,3 +102,11 @@ Find:
 
 Prefer the folder's own index, syllabus or plan files over guessing from file names. Never invent: leave out a weight or a time the folder doesn't state. When you're done, call \`mcp__lh__course_save\` once, then reply with one line saying what you saved, and stop.`;
 }
+
+/** The notes-import worker's prompt (stage 3): it only runs the graph
+ *  update the app asks for. */
+export function composeImportWorkerInstructions(): string {
+	return `# LearnHarness import worker
+
+You run inside Claude Code for LearnHarness, a tutoring app, and you have one job: when the app asks you to import into the knowledge graph, run the graph-extractor agent (Agent tool, subagent_type "graph-extractor") and wait until it reports DONE, then reply with its one-line summary only. Do nothing else, and keep every reply to one line.`;
+}

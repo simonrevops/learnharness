@@ -8,6 +8,7 @@ import { deliver, interrupt, liveProcess, sessionRecordFor, transcriptPath } fro
 import { typeInto } from "./terminal.ts";
 import { registerLive, unregisterLive } from "./live.ts";
 import { reseedPracticeGate } from "./tools.ts";
+import { mockStartedAt, type MockExam } from "../../core/courses.ts";
 
 /**
  * The pi Agent surface runPiTurn drives (subscribe / continue / abort /
@@ -30,6 +31,8 @@ export interface ClaudeCodeAgentOptions {
 	title: string;
 	messages: AgentMessage[];
 	onUsage?: (usage: Usage) => void;
+	/** A mock exam session: the learner's messages carry the clock. */
+	mock?: MockExam;
 }
 
 export class ClaudeCodeAgent {
@@ -101,7 +104,7 @@ export class ClaudeCodeAgent {
 	private pendingInput(): string | null {
 		const last = this.state.messages.at(-1) as LhMessage | undefined;
 		const learner = learnerInput(this.state.messages as unknown as LhMessage[]);
-		if (learner) return learner;
+		if (learner) return this.o.mock ? `${mockClock(this.state.messages as unknown as LhMessage[], this.o.mock)}${learner}` : learner;
 		if (last?.role === "toolResult" && QUESTION_NAMES.has(last.toolName)) {
 			// The learner answered the question(s) the teacher posed. Under pi the
 			// answer is the call's result; here it reaches Claude Code as the next
@@ -241,4 +244,12 @@ export function learnerInput(messages: readonly LhMessage[]): string | null {
 	}
 	const text = parts.filter((p) => p.trim()).reverse().join("\n\n");
 	return text || null;
+}
+
+/** The mock exam's clock line, once the paper is posed (else nothing). */
+export function mockClock(messages: readonly LhMessage[], mock: MockExam, now: number = Date.now()): string {
+	const start = mockStartedAt(messages as never);
+	if (start === null) return "";
+	const used = Math.max(0, Math.round((now - start) / 60_000));
+	return `[Mock exam — ${used} of ${mock.minutes} minutes used${used >= mock.minutes ? ": time is up" : ""}]\n\n`;
 }

@@ -37,8 +37,19 @@ interface ChatStages {
 	waiters: Set<() => void>;
 }
 
-const g = globalThis as { __lhCcStages?: Map<string, ChatStages> };
+const g = globalThis as { __lhCcStages?: Map<string, ChatStages>; __lhCcStageRoutes?: Map<string, string> };
 const stages = (g.__lhCcStages ??= new Map());
+/** Source id → the session that works its stages (notes imports have no
+ *  lesson session of their own). */
+const routes = (g.__lhCcStageRoutes ??= new Map());
+
+export function routeStages(sourceId: string, ownerId: string): void {
+	routes.set(sourceId, ownerId);
+}
+
+export function unrouteStages(sourceId: string): void {
+	routes.delete(sourceId);
+}
 
 function chatStages(chatId: string): ChatStages {
 	let s = stages.get(chatId);
@@ -73,8 +84,15 @@ export function finishStages(chatId: string, summary: string): void {
  *  subagent's accepted submit. The source id is the chat id for chat runs. */
 export function claudeCodeSubmitRunner<T>(spec: SubmitAgentSpec<T>): Promise<T> {
 	const chatId = spec.chatId ?? "";
-	const s = chatStages(chatId);
+	// A notes import's stages go to the Claude Code session working it.
+	const s = chatStages(routes.get(chatId) ?? chatId);
 	return new Promise<T>((resolve, reject) => {
+		// Nobody is working this update (it finished, or Claude Code could not
+		// be reached): fail fast instead of waiting forever.
+		if (s.done) {
+			reject(new Error("No Claude Code session is working this graph update"));
+			return;
+		}
 		const job: StageJob = {
 			id: `job_${crypto.randomUUID().slice(0, 8)}`,
 			spec: spec as SubmitAgentSpec<unknown>,

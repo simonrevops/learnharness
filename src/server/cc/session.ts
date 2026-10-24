@@ -136,7 +136,7 @@ export function transcriptPath(ccSessionId: string): string {
 
 /** Write the launch files: the shared workspace (with the graph-extractor
  *  subagent), this session's system prompt, and its MCP + settings. */
-function writeLaunchFiles(chatId: string): { mcp: string; settings: string; prompt: string; addDirs: string[] } {
+function writeLaunchFiles(chatId: string): { mcp: string; settings: string; prompt: string; addDirs: string[]; editFiles: string[] } {
 	fs.mkdirSync(path.join(CC_WORKSPACE, ".claude", "agents"), { recursive: true });
 	fs.writeFileSync(path.join(CC_WORKSPACE, ".claude", "agents", "graph-extractor.md"), GRAPH_EXTRACTOR_AGENT);
 	const spec = launchSpecFor(chatId);
@@ -166,15 +166,26 @@ function writeLaunchFiles(chatId: string): { mcp: string; settings: string; prom
 		JSON.stringify(
 			{
 				permissions: {
-					allow: [`mcp__${CC_MCP_SERVER}`, "Read", "Glob", "Grep", "WebSearch", "WebFetch", "Agent"],
-					deny: ["Bash", "Edit", "Write", "NotebookEdit"],
+					allow: [
+						`mcp__${CC_MCP_SERVER}`,
+						"Read",
+						"Glob",
+						"Grep",
+						"WebSearch",
+						"WebFetch",
+						"Agent",
+						// Write-back (opt-in): only these existing files. "//" anchors
+						// a rule at the filesystem root.
+						...(spec.editFiles ?? []).map((f) => `Edit(/${f})`),
+					],
+					deny: ["Bash", "Write", "NotebookEdit", ...((spec.editFiles ?? []).length > 0 ? [] : ["Edit"])],
 				},
 			},
 			null,
 			2,
 		),
 	);
-	return { mcp, settings, prompt, addDirs: spec.addDirs.filter((d) => fs.existsSync(d)) };
+	return { mcp, settings, prompt, addDirs: spec.addDirs.filter((d) => fs.existsSync(d)), editFiles: spec.editFiles ?? [] };
 }
 
 function launchCommand(rec: CcSessionRecord, title: string): string {
@@ -188,7 +199,11 @@ function launchCommand(rec: CcSessionRecord, title: string): string {
 		"--strict-mcp-config",
 		`--mcp-config ${shellQuote(files.mcp)}`,
 		`--system-prompt-file ${shellQuote(files.prompt)}`,
-		"--tools Read,Glob,Grep,WebSearch,WebFetch,Agent",
+		files.editFiles.length > 0
+			? // Write-back sessions get Edit, and anything not allowed is refused
+				// without asking (no prompt in a tab nobody watches).
+				"--tools Read,Glob,Grep,WebSearch,WebFetch,Agent,Edit --permission-mode dontAsk"
+			: "--tools Read,Glob,Grep,WebSearch,WebFetch,Agent",
 		// Course sessions read the learner's course folders (read-only: the
 		// settings deny every writing tool).
 		...files.addDirs.map((d) => `--add-dir ${shellQuote(d)}`),

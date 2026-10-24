@@ -210,7 +210,15 @@ export function Home({
 			    each course, floating top-left under the toggle — the graph's
 			    own chrome owns the top-right column. */}
 			<div className="lh-no-drag pointer-events-auto absolute left-3 top-12 z-10 max-h-[calc(100dvh-14rem)] overflow-y-auto">
-				<BlockPanel />
+				<BlockPanel
+					onShowCourse={(points) => {
+						// The course lens: the course's propositions become the pick,
+						// shown in the chain table — ready to practise from.
+						setPracticeProps(points);
+						setMode("practice");
+						setChainSelectOpen(true);
+					}}
+				/>
 			</div>
 
 			{/* New session — same floating blob as the chat composer, docked

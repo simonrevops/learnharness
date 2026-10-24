@@ -7,9 +7,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
 	blockWeek,
 	courseBrief,
+	mockBrief,
+	mockMinutes,
+	mockStartedAt,
 	courseIdFromFolder,
 	currentWeek,
 	nextAssessment,
@@ -17,7 +23,9 @@ import {
 	type Course,
 } from "../src/core/courses.ts";
 import { courseFromSubmission } from "../src/server/cc/course-setup.ts";
-import { learnerInput } from "../src/server/cc/agent.ts";
+import { learnerInput, mockClock } from "../src/server/cc/agent.ts";
+import { writeBackFiles } from "../src/store/courses.ts";
+import { beginStages, claudeCodeSubmitRunner, finishStages, routeStages, unrouteStages } from "../src/server/cc/stage.ts";
 import { convertTranscript, type CcEntry } from "../src/server/cc/transcript.ts";
 import { concludedByDismissalPair, newNextMessage, newProblemDismissedMarker, newThinkingMessage } from "../src/core/native-messages.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
@@ -207,4 +215,55 @@ test("a posed problem keeps its result in the record and ends the turn there", (
 	);
 	assert.deepEqual(out.messages.map((m) => m.role), ["assistant", "toolResult"], "chatter after the pose is dropped");
 	assert.equal((out.messages[1] as { toolName: string }).toolName, "problem");
+});
+
+// ─── stage 3–4 ──────────────────────────────────────────────────────────────
+
+test("a done assessment drops out of the next step and the brief lists it as done", () => {
+	const marked = { ...regression, assessments: regression.assessments.map((a) => (a.name === "Assignment 2" ? { ...a, done: true } : a)) };
+	assert.equal(nextAssessment(marked, "2026-10-24")?.assessment.name, "Quiz 2");
+	assert.match(suggestNext(marked, "2026-10-24", 0).label, /Recall practice for Quiz 2/);
+	assert.match(courseBrief(marked, "2026-10-24", null), /Assignment 2 — 2026-10-27, 25% of the grade, all aids allowed \(done\)/);
+});
+
+test("mock length comes from the assessment's format line", () => {
+	assert.equal(mockMinutes({ format: "3h on-site written ITX exam" }), 180);
+	assert.equal(mockMinutes({ format: "2 h in-class invigilated quiz" }), 120);
+	assert.equal(mockMinutes({ format: "1,5 timer" }), 90);
+	assert.equal(mockMinutes({ format: "a 45 min quiz" }), 45);
+	assert.equal(mockMinutes({}), 120);
+});
+
+test("the mock clock starts at the posed paper and says when time is up", () => {
+	const pose = [assistantCall("p1", "problem"), { ...result("p1", "problem"), timestamp: 1_000_000 } as LhMessage];
+	assert.equal(mockStartedAt(pose as never), 1_000_000);
+	assert.equal(mockClock([], { assessment: "Quiz 2", minutes: 120 }), "", "no clock before the paper");
+	assert.equal(mockClock(pose, { assessment: "Quiz 2", minutes: 120 }, 1_000_000 + 37 * 60_000), "[Mock exam — 37 of 120 minutes used]\n\n");
+	assert.match(mockClock(pose, { assessment: "Quiz 2", minutes: 120 }, 1_000_000 + 121 * 60_000), /time is up/);
+	assert.match(mockBrief({ assessment: "Quiz 2", minutes: 120 }, regression.assessments[2]), /MOCK EXAM: Quiz 2, 120 minutes, no aids/);
+});
+
+test("write-back: only existing read-first files inside the course folder, and the brief names them", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-wb-"));
+	const folder = path.join(dir, "Finance 1");
+	fs.mkdirSync(folder);
+	fs.writeFileSync(path.join(folder, "_HANDOFF_README.md"), "x");
+	const course = { ...finance, folder, readFirst: ["_HANDOFF_README.md", "_MISSING.md", "../../CLAUDE.md"] };
+	assert.deepEqual(writeBackFiles(course), [path.join(folder, "_HANDOFF_README.md")]);
+	const brief = courseBrief(course, "2026-10-24", dir, writeBackFiles(course));
+	assert.match(brief, /the only ones you may change are listed below/);
+	assert.match(brief, /Keeping his progress files current/);
+	assert.doesNotMatch(courseBrief(course, "2026-10-24", dir), /Keeping his progress files/);
+});
+
+test("stage jobs: an import's source routes to its worker; nobody working means fail fast", async () => {
+	const spec = (chatId: string) => ({ chatId, role: "extractor" }) as never;
+	finishStages("import_t", "idle");
+	await assert.rejects(claudeCodeSubmitRunner(spec("src_abc")), /No Claude Code session/);
+	beginStages("import_t");
+	routeStages("src_abc", "import_t");
+	const pending = claudeCodeSubmitRunner(spec("src_abc"));
+	finishStages("import_t", "done"); // rejects what's queued on the worker
+	await assert.rejects(pending, /graph update finished/);
+	unrouteStages("src_abc");
 });

@@ -48,4 +48,4 @@ export * from "./model-catalog.ts";
 export * from "./cc/index.ts";
 // Blocks and courses (fork, docs/blocks-and-courses.md).
 export * from "./courses.ts";
-export { saveBlock, blockFolders, getBlock } from "../store/courses.ts";
+export { saveBlock, blockFolders, getBlock, getCourse, setAssessmentDone, setWriteBack, writeBackEnabled, writeBackFiles } from "../store/courses.ts";

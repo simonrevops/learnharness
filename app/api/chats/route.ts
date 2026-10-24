@@ -1,6 +1,6 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
-import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, sessionCourseFor, stores, titleFromPrompt } from "@/src/server";
+import { compactionInFlight, courseNodes, createChat, isTurnRunning, listChats, readSettingsRecord, sessionCourseFor, stores, titleFromPrompt } from "@/src/server";
 import type { ChatListItem } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
@@ -20,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown; courseId?: unknown };
+	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown; courseId?: unknown; mock?: unknown };
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
 	// record — the practice agent + its tools from turn 1, no extraction.
@@ -28,7 +28,13 @@ export async function POST(req: Request) {
 	// The course link (fork, docs/blocks-and-courses.md): the session belongs
 	// to the course and to the week the course is in today.
 	const course = typeof body.courseId === "string" ? sessionCourseFor(body.courseId) : undefined;
-	const chat = createChat(titleFromPrompt(title || "Untitled session"), kind, course);
+	// A mock exam (fork, stage 3): a course practice session, timed.
+	const rawMock = body.mock as { assessment?: unknown; minutes?: unknown } | undefined;
+	const mock =
+		kind === "practice" && course && typeof rawMock?.assessment === "string" && typeof rawMock.minutes === "number" && rawMock.minutes > 0
+			? { assessment: rawMock.assessment, minutes: Math.round(rawMock.minutes) }
+			: undefined;
+	const chat = createChat(titleFromPrompt(title || "Untitled session"), kind, course, mock);
 	// PER-SESSION MODELS (owner, 2026-09-28): a session owns its model +
 	// thinking level from birth — stamped verbatim from the STRONG slot,
 	// the new-session default. From here the strong slot never reaches
@@ -50,7 +56,7 @@ export async function POST(req: Request) {
 	// The picks carry their own name/statement (what the learner saw at
 	// pick time); the chains derive from the CURRENT graph snapshot.
 	const rawPicks = (body.graphContext as { propositions?: unknown } | undefined)?.propositions;
-	const picks: GraphContextPick[] = Array.isArray(rawPicks)
+	const explicit: GraphContextPick[] = Array.isArray(rawPicks)
 		? rawPicks
 				.filter(
 						(p): p is GraphContextPick =>
@@ -62,6 +68,14 @@ export async function POST(req: Request) {
 					)
 					.slice(0, 64)
 			: [];
+	// A course practice session with nothing picked (fork, stage 3) opens on
+	// the course's own propositions — practice stays inside the course.
+	const picks: GraphContextPick[] =
+		explicit.length === 0 && kind === "practice" && course && !mock
+			? courseNodes(course.id)
+					.slice(0, 64)
+					.map((n) => ({ id: n.id, name: n.name, statement: n.statement }))
+			: explicit;
 	if (picks.length > 0) {
 		const byId = new Map(stores.graphStore.readNodes().map((n) => [n.id, n]));
 		const pickedNodes = picks.map((p) => byId.get(p.id)).filter((n) => n !== undefined);
