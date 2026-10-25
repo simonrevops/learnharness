@@ -65,6 +65,8 @@ This fork can run lessons through your own Claude Code session instead of an API
 
 It also knows about university blocks: point it at the folder holding this block's courses, and each course's folder is read once for its weeks and assessments. The home screen then shows what to do this week in each course, and lessons and practice sessions can read your course files. See [docs/blocks-and-courses.md](docs/blocks-and-courses.md).
 
+To open it like a Mac app, run `scripts/app/make-app.sh` once. It builds `~/Applications/LearnHarness.app`, which starts the server if it isn't running (log in `data/logs/server.log`) and opens LearnHarness in its own Chrome window.
+
 ## Development and support
 
 ```bash

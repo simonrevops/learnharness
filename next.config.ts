@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+	// LearnHarness.app (fork, scripts/app): the dev server is also reached
+	// as 127.0.0.1 (the Claude Code tool server, an older app window); next
+	// dev blocks its page scripts for any origin but localhost otherwise.
+	allowedDevOrigins: ["127.0.0.1"],
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).
