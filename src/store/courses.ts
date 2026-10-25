@@ -60,6 +60,7 @@ export function writeBackEnabled(courseId: string): boolean {
 /** The files write-back may edit: the course's read-first files that sit
  *  inside its folder and exist (never anything outside it, never new files). */
 export function writeBackFiles(course: Course): string[] {
+	if (!course.folder) return [];
 	const prefix = course.folder.endsWith(path.sep) ? course.folder : course.folder + path.sep;
 	return course.readFirst
 		.map((f) => path.resolve(course.folder, f))

@@ -37,9 +37,19 @@ This works with the Claude Code engine (docs/claude-code-engine.md).
 
 18. **A new block is a new folder.** "change" on the panel points LearnHarness at the next block's folder; each course there is read once. Earlier courses' records stay in `data/courses/`, and their points stay in the graph.
 
+## Courses & Topics
+
+19. **One page for every course and topic.** "Courses & Topics" in the sidebar shows this block's course cards (the same cards as the home panel), the earlier courses and the topics. The home panel stays the "this week" view. A course's or topic's points open in the chain table on the home screen, picked (`/?lens=<id>`).
+20. **Adding a course creates its folder.** "Add course" makes a new, empty folder in the block and opens it in Finder. The learner puts the course's files in it and presses "Read course"; from there it is a course like the others. That folder is the only thing LearnHarness creates outside its own data.
+21. **Topics are learning outside uni.** A topic is a name, a goal and, optionally, a folder of material, stored like a course (`data/courses/topic-<slug>.json`, `kind: "topic"`) with no weeks or assessments. Lessons and practice started from it carry the link, so it gets the same points lens and practice seeding as a course. A topic session's prompt carries the goal and tells the tutor to build on what the graph already holds; it may read the topic's folder and nothing else.
+22. **Earlier courses are the drafted courses no longer in the block.** When the home panel points at the next block, the old block's courses move to "Earlier courses" with their sessions, assessments and points; lessons and practice can still be started on them.
+23. **Sessions can be linked after the fact.** "Link to course or topic…" in a session's right-click menu attaches it to a course or topic (at the course week it started in) or unlinks it. It changes the session's record only; the session's Claude Code prompt picks up the course next time its tab is opened.
+
 ## Not built
 
 - Editing a course's weeks by hand in the app (re-read the folder instead, or edit `data/courses/<id>.json`).
 - Highlighting a course's points on the graph canvas itself (the course lens uses the chain table).
 - Research, demo, visual and PDF jobs under the Claude Code engine: Claude Code reads PDFs and searches the web itself, and the interactive demos and visuals aren't wired yet.
 - Calendar reminders.
+- Deleting or renaming a topic in the app (edit or move its file in `data/courses/`).
+- Earlier courses for semesters before this fork: their notes can be imported into the graph, but they only appear as courses once their folder has been read as a course.

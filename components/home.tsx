@@ -13,7 +13,7 @@ import { useFieldCycle } from "@/components/field-cycle";
 import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
 import { BlockPanel } from "@/components/block-panel";
-import type { TurnUsage } from "@/src/core";
+import type { LibraryOverview, TurnUsage } from "@/src/core";
 
 /**
  * Home — the knowledge graph is the main view, full-bleed edge to edge
@@ -96,6 +96,26 @@ export function Home({
 	const [mode, setMode] = useState<"teach" | "practice">("teach");
 	const [practiceProps, setPracticeProps] = useState<{ id: string; name: string; statement: string }[]>([]);
 	const [chainSelectOpen, setChainSelectOpen] = useState(false);
+	// The course lens from the Courses & Topics page (fork): /?lens=<id> opens
+	// that course's or topic's points in the chain table, picked.
+	useEffect(() => {
+		const id = new URLSearchParams(window.location.search).get("lens");
+		if (!id) return;
+		void fetch("/api/library")
+			.then((r) => r.json() as Promise<LibraryOverview>)
+			.then((lib) => {
+				const points =
+					lib.block.cards.find((c) => c.courseId === id)?.graphPoints ??
+					[...lib.topics, ...lib.past].find((e) => e.id === id)?.graphPoints ??
+					[];
+				if (points.length === 0) return;
+				setPracticeProps(points);
+				setMode("practice");
+				setChainSelectOpen(true);
+				window.history.replaceState(null, "", "/");
+			})
+			.catch(() => {});
+	}, []);
 	// The chain table is CONTROLLED off this id set (the lifted pick).
 	const pickedIds = useMemo(() => new Set(practiceProps.map((p) => p.id)), [practiceProps]);
 

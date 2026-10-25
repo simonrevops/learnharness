@@ -1,4 +1,4 @@
-import { courseBrief, isoDay, mockBrief } from "../../core/courses.ts";
+import { courseBrief, isoDay, isTopic, mockBrief, topicBrief } from "../../core/courses.ts";
 import { blockRoot, getBlock, getCourse, writeBackEnabled, writeBackFiles } from "../../store/courses.ts";
 import { stores } from "../stores.ts";
 import { composeClaudeCodeInstructions, composeCourseSetupInstructions, composeImportWorkerInstructions } from "./prompt.ts";
@@ -33,6 +33,8 @@ export function launchSpecFor(chatId: string): LaunchSpec {
 	const prompt = composeClaudeCodeInstructions(record?.kind === "practice" ? "practice" : "teach");
 	const course = record?.course ? getCourse(record.course.id) : null;
 	if (!course) return { prompt, addDirs: [] };
+	// A topic (Courses & Topics): its goal, its folder if it has one.
+	if (isTopic(course)) return { prompt: `${prompt}\n\n---\n\n${topicBrief(course)}`, addDirs: course.folder ? [course.folder] : [] };
 	const block = getBlock();
 	const root = block ? blockRoot(block) : null;
 	// Write-back (opt-in): never in a mock exam.

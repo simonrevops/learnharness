@@ -184,6 +184,19 @@ function renameChat(id: string, title: string): ChatRecord {
 	return record;
 }
 
+/** Link a session to a course or topic, or unlink it (fork, Courses &
+ *  Topics: "Link to…"). Like a rename, not conversation activity —
+ *  updatedAt stays, so the sidebar order holds. */
+function setCourse(id: string, course: SessionCourse | null): ChatRecord {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	if (course) record.course = course;
+	else delete record.course;
+	writeChat(record);
+	emit("chats-changed", {});
+	return record;
+}
+
 /** Delete the session record file entirely (session-deletion wave 6,
  *  owner 2026-09-22). False when the id is unknown — the route turns that
  *  into a 404. The record's graph traces and jobs are the route's
@@ -216,6 +229,7 @@ export const chatStore: ChatStore = {
 	saveTree,
 	saveSettings,
 	renameChat,
+	setCourse,
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,

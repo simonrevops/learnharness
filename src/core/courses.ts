@@ -36,8 +36,12 @@ export interface CourseAssessment {
 
 export interface Course {
 	id: string;
+	/** A topic (fork, Courses & Topics) is something learned outside uni: a
+	 *  name, a goal and maybe a folder — no weeks, no assessments. Absent
+	 *  means a course. */
+	kind?: "course" | "topic";
 	name: string;
-	/** Absolute path of the course folder. */
+	/** Absolute path of the course folder; empty for a topic without one. */
 	folder: string;
 	/** What the course is and what its assessments reward — one paragraph. */
 	summary: string;
@@ -221,6 +225,48 @@ export function courseBrief(course: Course, today: string, root: string | null, 
 		);
 	}
 	return lines.join("\n");
+}
+
+export function isTopic(c: Pick<Course, "kind">): boolean {
+	return c.kind === "topic";
+}
+
+/** A topic id from its name: "topic-" plus the slug, so a topic never
+ *  takes the id a course folder of the same name would get. */
+export function topicIdFromName(name: string): string {
+	return `topic-${courseIdFromFolder(name)}`;
+}
+
+/** The topic section of a topic session's tutor prompt (Courses & Topics). */
+export function topicBrief(topic: Course): string {
+	const lines = [`# This session's topic: ${topic.name}`, "", `His goal: ${topic.summary.trim()}`, ""];
+	if (topic.folder) lines.push(`His material for it is in \`${topic.folder}\`; you can read everything there but never change it.`, "");
+	lines.push(
+		"This is learning outside his degree. Before probing, look at what the knowledge graph already holds (list_sessions, list_propositions): build on what he knows from his courses and earlier topics, and connect new ideas to it where they genuinely meet.",
+	);
+	return lines.join("\n");
+}
+
+/** One course or topic on the Courses & Topics page. */
+export interface LibraryEntry {
+	id: string;
+	kind: "course" | "topic";
+	name: string;
+	folder: string;
+	summary: string;
+	lessons: number;
+	practice: number;
+	/** The newest session's last activity, or null with none. */
+	lastActive: string | null;
+	assessments: { total: number; done: number };
+	graphPoints: Array<{ id: string; name: string; statement: string }>;
+}
+
+/** The Courses & Topics page: this block's cards, earlier courses, topics. */
+export interface LibraryOverview {
+	block: BlockOverview;
+	past: LibraryEntry[];
+	topics: LibraryEntry[];
 }
 
 /** The home screen's block overview (src/server/courses.ts builds it). */

@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, LibraryIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
-import type { ChatListItem } from "@/src/core";
+import type { ChatListItem, LibraryOverview } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 
 /**
@@ -699,6 +699,19 @@ function SessionsSidebar() {
 						Practice
 						<span className="sr-only">create a new practice session</span>
 					</button>
+					{/* Courses & Topics (fork, docs/blocks-and-courses.md): every
+					    course and topic, and where new ones are added. */}
+					<Link
+						href="/courses"
+						data-testid="courses-topics-link"
+						className={cn(
+							"flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+							pathname === "/courses" && "bg-accent text-foreground",
+						)}
+					>
+						<LibraryIcon className="size-3" />
+						Courses &amp; Topics
+					</Link>
 				</div>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
@@ -874,6 +887,10 @@ function SessionsSidebar() {
 						>
 							Rename
 						</button>
+						<LinkToMenu
+							chat={chats?.find((c) => c.id === ctxChatId) ?? null}
+							onDone={() => setCtxChatId(null)}
+						/>
 						{/* Export as Markdown (owner, release polish 2026-10-06): the
 					    session-markdown engine's user-facing debut — same-origin
 						    anchor download; the route's Content-Disposition names the
@@ -935,5 +952,66 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 			    matters for the events it dispatches, never for DOM priority. */}
 			<KeyboardShortcuts />
 		</SettingsDialogProvider>
+	);
+}
+
+/** "Link to…" in a session's context menu (fork, Courses & Topics): attach
+ *  the session to a course or topic after the fact, or unlink it. The list
+ *  is fetched when it opens. */
+function LinkToMenu({ chat, onDone }: { chat: ChatListItem | null; onDone: () => void }) {
+	const [open, setOpen] = useState(false);
+	const [options, setOptions] = useState<Array<{ id: string; name: string }> | null>(null);
+	useEffect(() => {
+		if (!open || options) return;
+		void fetch("/api/library")
+			.then((r) => r.json() as Promise<LibraryOverview>)
+			.then((lib) => {
+				const current = lib.block.cards.flatMap((c) => (c.course ? [{ id: c.course.id, name: c.course.name }] : []));
+				setOptions([...current, ...lib.topics, ...lib.past].map(({ id, name }) => ({ id, name })));
+			})
+			.catch(() => setOptions([]));
+	}, [open, options]);
+	if (!chat) return null;
+	const link = async (courseId: string | null) => {
+		onDone();
+		try {
+			const res = await fetch(`/api/chats/${chat.id}/course`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ courseId }),
+			});
+			if (!res.ok) throw new Error(`link failed: ${res.status}`);
+		} catch (err) {
+			console.error("link failed:", err); // the sidebar keeps the old link
+		}
+	};
+	const ITEM = "flex items-center rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent";
+	return (
+		<>
+			<button type="button" data-testid="ctx-link" onClick={() => setOpen(!open)} className={`${ITEM} text-foreground`}>
+				{chat.course?.name ? "Linked to…" : "Link to course or topic…"}
+			</button>
+			{open && (
+				<div className="ml-2 flex flex-col gap-0.5 border-l border-border/60 pl-1">
+					{options === null && <span className="px-2.5 py-1.5 text-muted-foreground">Loading…</span>}
+					{options?.map((o) => (
+						<button
+							key={o.id}
+							type="button"
+							onClick={() => void link(o.id)}
+							className={`${ITEM} ${chat.course?.id === o.id ? "text-foreground" : "text-muted-foreground"}`}
+						>
+							{chat.course?.id === o.id ? "✓ " : ""}
+							{o.name}
+						</button>
+					))}
+					{chat.course && (
+						<button type="button" onClick={() => void link(null)} className={`${ITEM} text-muted-foreground/80`}>
+							Unlink
+						</button>
+					)}
+				</div>
+			)}
+		</>
 	);
 }

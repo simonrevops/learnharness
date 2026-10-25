@@ -44,7 +44,26 @@ export function daysLeftLabel(n: number): string {
 
 const AIDS_LABEL = { none: "no aids", some: "some aids", all: "all aids" } as const;
 
-const BUTTON =
+/** Start a course card's suggested session, or its mock exam. Resolves to
+ *  the new session's page, or null when there is nothing to start. Shared
+ *  with the Courses & Topics page. */
+export async function startCourseSession(card: CourseCard, mock?: boolean): Promise<string | null> {
+	const s = card.suggestion;
+	const next = card.next?.assessment;
+	if (!s || (mock && !next)) return null;
+	return mock
+		? await startDraftSession(
+				`${card.course?.name}: mock exam for ${next!.name}, ${mockMinutes(next!)} minutes.`,
+				fetch,
+				"practice",
+				undefined,
+				card.courseId,
+				{ assessment: next!.name, minutes: mockMinutes(next!) },
+			)
+		: await startDraftSession(s.prompt, fetch, s.mode === "practice" ? "practice" : undefined, undefined, card.courseId);
+}
+
+export const BUTTON =
 	"inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent disabled:cursor-default disabled:opacity-60";
 
 export function BlockPanel({
@@ -88,22 +107,10 @@ export function BlockPanel({
 	};
 
 	const start = async (card: CourseCard, mock?: boolean) => {
-		const s = card.suggestion;
-		const next = card.next?.assessment;
-		if (!s || starting) return;
-		if (mock && !next) return;
+		if (starting) return;
 		setStarting(card.courseId);
 		try {
-			const target = mock
-				? await startDraftSession(
-						`${card.course?.name}: mock exam for ${next!.name}, ${mockMinutes(next!)} minutes.`,
-						fetch,
-						"practice",
-						undefined,
-						card.courseId,
-						{ assessment: next!.name, minutes: mockMinutes(next!) },
-					)
-				: await startDraftSession(s.prompt, fetch, s.mode === "practice" ? "practice" : undefined, undefined, card.courseId);
+			const target = await startCourseSession(card, mock);
 			if (target) router.push(target);
 		} finally {
 			setStarting(null);
@@ -205,7 +212,7 @@ export function BlockPanel({
 	);
 }
 
-function CourseCardView({
+export function CourseCardView({
 	card,
 	starting,
 	onStart,
